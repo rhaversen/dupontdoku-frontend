@@ -1,26 +1,201 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+	--xp-bg: #ece9d8;
+	--xp-blue: #0058e6;
+	--xp-blue-dark: #0055ea;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+	height: 100%;
+	margin: 0;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+	background: url("/xp_background.jpg") no-repeat center center fixed;
+	background-size: cover;
+	color: #000;
+	font-family: Tahoma, "Segoe UI", Arial, sans-serif;
+	font-size: 12px;
+	overflow: hidden;
+}
+
+.xp-window {
+	background: var(--xp-bg);
+	border-radius: 8px 8px 0 0;
+	border: 1px solid #0831d9;
+	box-shadow:
+		0 0 0 1px rgba(255, 255, 255, 0.25),
+		3px 3px 10px rgba(0, 0, 0, 0.45);
+}
+
+.xp-title {
+	background:
+		linear-gradient(to bottom, #0058ee 0%, #3f93ff 8%, #0058ee 40%, #0054e3 88%, #0054e3 93%, #3f93ff 96%, #0d5ae5 100%);
+	color: #fff;
+	font-weight: bold;
+	text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
+	padding: 3px 4px 4px 6px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	border-radius: 7px 7px 0 0;
+	-webkit-user-select: none;
+	user-select: none;
+	cursor: default;
+}
+
+.xp-title.inactive {
+	background: linear-gradient(to bottom, #7ba2e7 0%, #96b8f0 8%, #7ba2e7 40%, #7496dd 88%, #7496dd 93%, #96b8f0 96%, #6f92db 100%);
+}
+
+.xp-title-icon {
+	width: 16px;
+	height: 16px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 13px;
+}
+
+.xp-btn {
+	background: linear-gradient(to bottom, #fff 0%, #ecebe5 45%, #d8d2c4 90%, #f4f2ea 100%);
+	border: 1px solid #003c74;
+	border-radius: 3px;
+	padding: 2px 10px;
+	min-width: 16px;
+	min-height: 21px;
+	font-size: 11px;
+	line-height: 1;
+	cursor: default;
+	color: #000;
+}
+
+.xp-btn:hover {
+	border-color: #f0a30a;
+	box-shadow: inset 0 0 0 1px #fce188;
+}
+
+.xp-btn:focus-visible {
+	outline: 1px dotted #000;
+	outline-offset: -4px;
+}
+
+.xp-btn:active {
+	background: linear-gradient(to bottom, #cdcac1 0%, #e3e0d8 100%);
+	box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.xp-title-btn {
+	width: 21px;
+	height: 21px;
+	border: 1px solid #fff;
+	border-radius: 3px;
+	color: #fff;
+	font-size: 12px;
+	font-weight: bold;
+	line-height: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: default;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.xp-title-btn.min,
+.xp-title-btn.max {
+	background: linear-gradient(to bottom, #4b8ff5 0%, #2f75e8 45%, #2159c9 90%, #3a7dee 100%);
+}
+
+.xp-title-btn.min:hover,
+.xp-title-btn.max:hover {
+	background: linear-gradient(to bottom, #6ea6f8 0%, #4a8aef 45%, #3469d4 90%, #5593f0 100%);
+}
+
+.xp-title-btn.close {
+	background: linear-gradient(to bottom, #eba089 0%, #d75b34 45%, #b02f12 90%, #cf5c33 100%);
+}
+
+.xp-title-btn.close:hover {
+	background: linear-gradient(to bottom, #f4b7a5 0%, #e4714b 45%, #c33e1b 90%, #dd6f45 100%);
+}
+
+.xp-inset {
+	border: 1px solid #7f9db9;
+	border-radius: 0;
+	background: #fff;
+	padding: 2px;
+	font-size: 11px;
+}
+
+.xp-inset:focus {
+	outline: none;
+	border-color: #316ac5;
+}
+
+.xp-group {
+	border: 1px solid #d0cfc7;
+	border-radius: 4px;
+	background: #fff;
+}
+
+.xp-taskbar {
+	background: linear-gradient(to bottom, #245edb 0%, #3f8cf3 9%, #245edb 18%, #245edb 92%, #1941a5 96%, #2b5fd0 100%);
+	border-top: 1px solid #0b60ff;
+	box-shadow: 0 -1px 0 #0831d9;
+	height: 32px;
+}
+
+.xp-start-btn {
+	background: linear-gradient(to bottom, #55b453 0%, #3c9338 40%, #2f8a10 90%, #379115 100%);
+	border: 1px solid #1c5c17;
+	border-radius: 0 10px 10px 0;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+	color: #fff;
+	font-weight: bold;
+	font-style: italic;
+	font-size: 15px;
+	padding: 3px 16px 3px 10px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.6);
+	cursor: default;
+}
+
+.xp-start-btn:hover {
+	background: linear-gradient(to bottom, #6cc36a 0%, #4aa846 40%, #3a9c1d 90%, #44a522 100%);
+}
+
+.xp-task-btn {
+	background: linear-gradient(to bottom, #4d94f7 0%, #3681f0 45%, #1f63cf 100%);
+	border: 1px solid #1a4fb8;
+	border-radius: 3px;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+	color: #fff;
+	padding: 3px 8px;
+	font-size: 11px;
+	max-width: 150px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: default;
+}
+
+.xp-task-btn:hover {
+	background: linear-gradient(to bottom, #66a8f9 0%, #4a92f3 45%, #2f74da 100%);
+}
+
+.xp-tray {
+	background: linear-gradient(to bottom, #14a5e9 0%, #1bb4f5 9%, #1290e9 18%, #1290e9 92%, #0b78c0 96%, #1a9ee8 100%);
+	border-left: 1px solid #0b61b0;
+	box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.3);
+	color: #fff;
+	padding: 3px 12px;
+	border-radius: 0 0 0 0;
+}
+
+.xp-tray-clock {
+	text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.4);
 }
