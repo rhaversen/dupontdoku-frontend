@@ -72,6 +72,7 @@ export function VideoPlayer({ videos }: { videos: Video[] }) {
 	const [ready, setReady] = useState(false);
 	const playerRef = useRef<YTPlayer | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	const seekTimer = useRef<number | null>(null);
 
 	useEffect(() => {
 		let destroyed = false;
@@ -111,13 +112,27 @@ export function VideoPlayer({ videos }: { videos: Video[] }) {
 
 	useEffect(() => {
 		if (!playing) return;
-		const id = setInterval(() => {
-			if (playerRef.current) {
-				setTime(playerRef.current.getCurrentTime());
-				setDuration(playerRef.current.getDuration());
+		let raf = 0;
+		let lastSync = 0;
+		const tick = () => {
+			const player = playerRef.current;
+			if (player) {
+				const now = performance.now();
+				// resync against the real player at most every 500ms,
+				// interpolate locally in between so the UI stays smooth
+				if (now - lastSync > 500) {
+					lastSync = now;
+					setTime(player.getCurrentTime());
+					const d = player.getDuration();
+					if (d) setDuration(d);
+				} else {
+					setTime((t) => t + 1 / 60);
+				}
 			}
-		}, 250);
-		return () => clearInterval(id);
+			raf = requestAnimationFrame(tick);
+		};
+		raf = requestAnimationFrame(tick);
+		return () => cancelAnimationFrame(raf);
 	}, [playing]);
 
 	function select(index: number) {
@@ -129,6 +144,8 @@ export function VideoPlayer({ videos }: { videos: Video[] }) {
 	function togglePlay() {
 		const player = playerRef.current;
 		if (!player) return;
+		// optimistic: reflect the intent immediately, onStateChange reconciles later
+		setPlaying(player.getPlayerState() !== STATE_PLAYING);
 		if (player.getPlayerState() === STATE_PLAYING) {
 			player.pauseVideo();
 		} else {
@@ -137,10 +154,14 @@ export function VideoPlayer({ videos }: { videos: Video[] }) {
 	}
 
 	function seekRatio(ratio: number) {
-		const player = playerRef.current;
-		if (!player || !duration) return;
-		player.seekTo(ratio * duration, true);
+		// optimistic: UI follows the slider instantly, the actual seek is
+		// debounced so dragging doesn't spam the player
 		setTime(ratio * duration);
+		if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
+		seekTimer.current = window.setTimeout(() => {
+			seekTimer.current = null;
+			playerRef.current?.seekTo(ratio * duration, true);
+		}, 100);
 	}
 
 	const video = videos[current];
