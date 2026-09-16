@@ -75,6 +75,17 @@ function formatTime(seconds: number) {
 
 const POPUP_POLL_MS = 500;
 
+// event names for the desktop-window based auth flow
+export const SPOTIFY_CONNECTED_EVENT = "dupontdoku:spotify-connected";
+export const SPOTIFY_AUTH_OPEN_EVENT = "dupontdoku:spotify-auth-open";
+export const SPOTIFY_AUTH_CLOSE_EVENT = "dupontdoku:spotify-auth-close";
+
+// the OAuth callback page posts this payload when the flow completes
+export interface SpotifyConnectedMessage {
+	type: typeof SPOTIFY_CONNECTED_EVENT;
+	displayName: string;
+}
+
 export function SpotifyPlayer() {
 	const [tracks, setTracks] = useState<Track[] | null>(null);
 	const [artistName, setArtistName] = useState("");
@@ -118,10 +129,16 @@ export function SpotifyPlayer() {
 		};
 	}, []);
 
-	// listen for the "connected" message from the OAuth popup
+	// listen for the "connected" message from the auth window (popup or desktop iframe)
 	useEffect(() => {
 		const onMessage = (e: MessageEvent) => {
-			if (e.data === "dupontdoku:spotify-connected") {
+			let payload: SpotifyConnectedMessage | null = null;
+			try {
+				payload = typeof e.data === "string" ? (JSON.parse(e.data) as SpotifyConnectedMessage) : (e.data as SpotifyConnectedMessage);
+			} catch {
+				return;
+			}
+			if (payload?.type === SPOTIFY_CONNECTED_EVENT) {
 				setPopupOpen(false);
 				setLoginAttempt((n) => n + 1);
 			}
@@ -202,35 +219,9 @@ export function SpotifyPlayer() {
 	}, [loginAttempt]);
 
 	const openAuthPopup = useCallback(() => {
-		// reuse the popup if it is still open
-		if (popupRef.current && !popupRef.current.closed) {
-			popupRef.current.focus();
-			return;
-		}
-		const width = 480;
-		const height = 720;
-		const left = window.screenX + (window.outerWidth - width) / 2;
-		const top = window.screenY + (window.outerHeight - height) / 2;
-		const popup = window.open(
-			"/api/spotify-auth/auth",
-			"dupontdoku-spotify-auth",
-			`width=${width},height=${height},left=${left},top=${top}`,
-		);
-		if (!popup) {
-			// popup blocked — fall back to same-tab redirect
-			window.location.href = "/api/spotify-auth/auth";
-			return;
-		}
-		popupRef.current = popup;
-		setPopupOpen(true);
-		// detect manual close; also retry in case postMessage didn't arrive
-		const poll = setInterval(() => {
-			if (popup.closed) {
-				clearInterval(poll);
-				setPopupOpen(false);
-				setLoginAttempt((n) => n + 1);
-			}
-		}, POPUP_POLL_MS);
+		// ask the desktop to open the auth window instead of a browser popup;
+		// page.tsx listens for this and opens "Connect Spotify - Internet Explorer"
+		window.dispatchEvent(new MessageEvent(SPOTIFY_AUTH_OPEN_EVENT));
 	}, []);
 
 	const track = tracks?.[current];

@@ -2,11 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { VideoPlayer, type Video } from "./video-player";
-import { SpotifyPlayer } from "./spotify-player";
+import { SpotifyPlayer, SPOTIFY_CONNECTED_EVENT, SPOTIFY_AUTH_CLOSE_EVENT } from "./spotify-player";
 
 type Point = { x: number; y: number };
 
-type WinState = { id: SectionId; minimized: boolean; maximized: boolean };
+type WinState = {
+	id: SectionId;
+	minimized: boolean;
+	maximized: boolean;
+	// temporary size override (used by the Spotify auth window to grow to fit)
+	sizeOverride?: { width: number; height: number };
+};
 
 type SectionId =
 	| "welcome"
@@ -16,7 +22,8 @@ type SectionId =
 	| "about"
 	| "instagram"
 	| "videos"
-	| "secret";
+	| "secret"
+	| "spotifyAuth";
 
 type IgPost = {
 	id: string;
@@ -36,6 +43,7 @@ const SECTIONS: Record<SectionId, { icon: string; title: string }> = {
 	instagram: { icon: "/icons/48/instagram.png", title: "Instagram - dupont0k" },
 	videos: { icon: "/icons/48/videos.png", title: "Videos - Media Player" },
 	secret: { icon: "/icons/48/guestlist.png", title: "guestlist.exe" },
+	spotifyAuth: { icon: "/icons/48/music.png", title: "Connect Spotify - Internet Explorer" },
 };
 
 const LINKS = {
@@ -88,6 +96,7 @@ function DraggableWindow({
 	section,
 	minimized,
 	maximized,
+	sizeOverride,
 	onClose,
 	onMinimize,
 	onToggleMax,
@@ -99,6 +108,7 @@ function DraggableWindow({
 	section: SectionId;
 	minimized: boolean;
 	maximized: boolean;
+	sizeOverride?: { width: number; height: number };
 	onClose: () => void;
 	onMinimize: () => void;
 	onToggleMax: () => void;
@@ -140,12 +150,17 @@ function DraggableWindow({
 				top: maximized ? 0 : pos.y,
 				width: maximized
 					? "100%"
-					: section === "instagram"
-						? 460
-						: section === "videos"
-							? 520
-							: 400,
-				height: maximized ? "calc(100% - 32px)" : undefined,
+					: sizeOverride?.width ??
+						(section === "instagram"
+							? 460
+							: section === "videos" || section === "spotifyAuth"
+								? 520
+								: 400),
+				height: maximized
+					? "calc(100% - 32px)"
+					: sizeOverride?.height !== undefined
+						? sizeOverride.height
+						: undefined,
 				zIndex: z,
 			}}
 			onPointerDown={onFocus}
@@ -409,6 +424,77 @@ function InstagramGallery() {
 	);
 }
 
+function SpotifyAuthFrame() {
+	// closes the window when the OAuth flow completes (the callback page
+	// inside the iframe posts a "spotify-connected" message to its parent)
+	const [done, setDone] = useState(false);
+	const [displayName, setDisplayName] = useState("");
+
+	// ask the desktop to resize this window and mark it as the auth window
+	useEffect(() => {
+		window.dispatchEvent(
+			new CustomEvent("dupontdoku:spotify-auth-resize", { detail: { width: 520, height: 780 } }),
+		);
+
+		const onMessage = (e: MessageEvent) => {
+			let payload: { type?: string; displayName?: string } | null = null;
+			try {
+				payload =
+					typeof e.data === "string"
+						? (JSON.parse(e.data) as { type?: string; displayName?: string })
+						: (e.data as { type?: string; displayName?: string });
+			} catch {
+				return;
+			}
+			if (payload?.type === SPOTIFY_CONNECTED_EVENT) {
+				setDisplayName(payload.displayName ?? "");
+				setDone(true);
+			}
+		};
+		window.addEventListener("message", onMessage);
+		return () => window.removeEventListener("message", onMessage);
+	}, []);
+
+	// auto-close shortly after connecting
+	useEffect(() => {
+		if (!done) return;
+		const id = setTimeout(() => {
+			window.dispatchEvent(new MessageEvent("message", { data: SPOTIFY_AUTH_CLOSE_EVENT }));
+		}, 1500);
+		return () => clearTimeout(id);
+	}, [done]);
+
+	return (
+		<div className="flex h-full flex-col">
+			<div className="flex items-center gap-2 border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-0.5 text-[11px]">
+				<span className="rounded-sm border border-[#7f9db9] bg-white px-2 py-0.5">
+					https://accounts.spotify.com/authorize
+				</span>
+				<button
+					className="xp-btn px-2 py-0.5"
+					onClick={() =>
+						window.dispatchEvent(new MessageEvent("message", { data: SPOTIFY_AUTH_CLOSE_EVENT }))
+					}
+				>
+					Close
+				</button>
+			</div>
+			{done ? (
+				<div className="flex flex-1 items-center justify-center bg-white text-[12px]">
+					✅ Connected{displayName ? ` as ${displayName}` : ""} — this window closes
+					automatically.
+				</div>
+			) : (
+				<iframe
+					src="/api/spotify-auth/auth"
+					title="Spotify login"
+					className="min-h-0 flex-1 border-0 bg-white"
+				/>
+			)}
+		</div>
+	);
+}
+
 function SectionContent({
 	section,
 	onOpenSection,
@@ -489,6 +575,8 @@ function SectionContent({
 			return <InstagramGallery />;
 		case "secret":
 			return <GuestlistGame onOpenSection={onOpenSection} />;
+		case "spotifyAuth":
+			return <SpotifyAuthFrame />;
 		case "videos":
 			return <VideoPlayer videos={VIDEOS} />;
 		case "about":
@@ -571,6 +659,40 @@ export default function Home() {
 		setStartOpen(false);
 	};
 
+	// the Spotify player asks the desktop to open the auth window
+	// (instead of a browser popup)
+	useEffect(() => {
+		const onAuthOpen = () => openSection("spotifyAuth");
+		const onAuthResize = (e: Event) => {
+			// grow the auth window to fit the login page
+			const { width, height } = (e as CustomEvent<{ width: number; height: number }>).detail;
+			setWins((prev) =>
+				prev.map((w) =>
+					w.id === "spotifyAuth" ? { ...w, minimized: false, sizeOverride: { width, height } } : w,
+				),
+			);
+		};
+		const onAuthClose = () => {
+			setWins((prev) => prev.filter((w) => w.id !== "spotifyAuth"));
+		};
+		window.addEventListener("dupontdoku:spotify-auth-open", onAuthOpen);
+		window.addEventListener("dupontdoku:spotify-auth-resize", onAuthResize);
+		window.addEventListener("message", (e: MessageEvent) => {
+			let payload: { type?: string } | null = null;
+			try {
+				payload = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+			} catch {
+				return;
+			}
+			if (payload?.type === SPOTIFY_AUTH_CLOSE_EVENT) onAuthClose();
+		});
+		return () => {
+			window.removeEventListener("dupontdoku:spotify-auth-open", onAuthOpen);
+			window.removeEventListener("dupontdoku:spotify-auth-resize", onAuthResize);
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
 	const focusSection = (id: SectionId) => {
 		setWins((prev) =>
 			prev[prev.length - 1]?.id === id
@@ -621,6 +743,7 @@ export default function Home() {
 					section={w.id}
 					minimized={w.minimized}
 					maximized={w.maximized}
+					sizeOverride={w.sizeOverride}
 					initial={{ x: 140 + i * 28, y: 40 + i * 28 }}
 					z={i + 1}
 					onClose={() => closeSection(w.id)}
