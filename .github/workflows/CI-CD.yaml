@@ -1,0 +1,17 @@
+name: CI/CD
+
+on:
+    push:
+        branches: ["main", "staging"]
+
+jobs:
+    build-and-deploy:
+        uses: rhaversen/.github/.github/workflows/ci-cd.yml@main
+        with:
+            project_name: "DupontdokuFrontend"
+            dockerhub_image_name: "dupontdoku-frontend"
+            node_version: "lts/*"
+        secrets:
+            DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+            DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+            DEVOPS_REPO_TOKEN: ${{ secrets.DEVOPS_REPO_TOKEN }}
