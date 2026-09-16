@@ -20,19 +20,9 @@ type SectionId =
 	| "tour"
 	| "tickets"
 	| "about"
-	| "instagram"
 	| "videos"
 	| "secret"
 	| "spotifyAuth";
-
-type IgPost = {
-	id: string;
-	permalink: string;
-	mediaUrl: string;
-	mediaType: "IMAGE" | "VIDEO" | "CAROUSEL_ALBUM";
-	caption: string;
-	timestamp: string;
-};
 
 const SECTIONS: Record<SectionId, { icon: string; title: string }> = {
 	welcome: { icon: "/icons/48/welcome.png", title: "Welcome" },
@@ -40,7 +30,6 @@ const SECTIONS: Record<SectionId, { icon: string; title: string }> = {
 	tour: { icon: "/icons/48/tour.png", title: "Tour Dates" },
 	tickets: { icon: "/icons/48/tickets.png", title: "Buy Tickets" },
 	about: { icon: "/icons/48/readme.png", title: "README.TXT - Notepad" },
-	instagram: { icon: "/icons/48/instagram.png", title: "Instagram - dupont0k" },
 	videos: { icon: "/icons/48/videos.png", title: "Videos - Media Player" },
 	secret: { icon: "/icons/48/guestlist.png", title: "guestlist.exe" },
 	spotifyAuth: { icon: "/icons/48/music.png", title: "Connect Spotify - Internet Explorer" },
@@ -80,7 +69,6 @@ const DESKTOP_ICONS: { id: SectionId; label: string }[] = [
 	{ id: "videos", label: "Videos" },
 	{ id: "tour", label: "Tour Dates" },
 	{ id: "tickets", label: "Tickets" },
-	{ id: "instagram", label: "Instagram" },
 ];
 
 const START_LINKS: { icon: string; label: string; href: string }[] = [
@@ -151,11 +139,7 @@ function DraggableWindow({
 				width: maximized
 					? "100%"
 					: sizeOverride?.width ??
-						(section === "instagram"
-							? 460
-							: section === "videos" || section === "spotifyAuth"
-								? 520
-								: 400),
+						(section === "videos" || section === "spotifyAuth" ? 520 : 400),
 				height: maximized
 					? "calc(100% - 32px)"
 					: sizeOverride?.height !== undefined
@@ -310,9 +294,6 @@ function GuestlistGame({ onOpenSection }: { onOpenSection: (id: SectionId) => vo
 								<button className="xp-btn" onClick={() => onOpenSection("tour")}>
 					<img src="/icons/16/tour.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Tour dates
 					</button>
-					<button className="xp-btn" onClick={() => onOpenSection("instagram")}>
-						<img src="/icons/16/instagram.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Concert photos
-					</button>
 					<a className="xp-btn text-center" href={LINKS.spotify} target="_blank" rel="noopener noreferrer">
 						<img src="/icons/16/music.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Spotify
 					</a>
@@ -335,91 +316,6 @@ function GuestlistGame({ onOpenSection }: { onOpenSection: (id: SectionId) => vo
 			<a className="text-[11px] text-[#0000cc] underline" href={`mailto:${LINKS.email}`}>
 				Get in touch: {LINKS.email}
 			</a>
-		</div>
-	);
-}
-
-function InstagramGallery() {
-	const [posts, setPosts] = useState<IgPost[] | null>(null);
-	const [error, setError] = useState<string | null>(null);
-
-	useEffect(() => {
-		let cancelled = false;
-		fetch("/api/instagram")
-			.then((res) => res.json())
-			.then((data: { posts?: IgPost[]; error?: string }) => {
-				if (cancelled) return;
-				if (data.error) setError(data.error);
-				else setPosts(data.posts ?? []);
-			})
-			.catch(() => !cancelled && setError("Failed to load Instagram feed"));
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
-	if (error) {
-		return (
-			<div className="xp-inset h-48 overflow-auto rounded-sm p-3 text-[11px]">
-				<p className="mb-2 font-bold">Unable to load Instagram feed:</p>
-				<p>{error}</p>
-				<p className="mt-2 opacity-70">
-					Set INSTAGRAM_ACCESS_TOKEN in dupontdoku-backend/.env (Basic Display API,
-					@dupont0k).
-				</p>
-			</div>
-		);
-	}
-
-	if (!posts) {
-		return (
-			<div className="xp-inset h-64 rounded-sm p-3 text-[11px]">Loading @dupont0k feed...</div>
-		);
-	}
-
-	return (
-		<div>
-			<div className="xp-inset grid max-h-64 grid-cols-3 gap-1 overflow-auto rounded-sm p-1">
-				{posts.map((post) => (
-					<a
-						key={post.id}
-						href={post.permalink}
-						target="_blank"
-						rel="noopener noreferrer"
-						title={post.caption ?? "View on Instagram"}
-						className="group relative block aspect-square overflow-hidden bg-[#ece9d8]"
-					>
-						{/* eslint-disable-next-line @next/next/no-img-element */}
-						<img
-							src={post.mediaUrl}
-							alt={post.caption?.slice(0, 80) ?? "Instagram post"}
-							className="h-full w-full object-cover"
-							loading="lazy"
-						/>
-						{post.mediaType !== "IMAGE" && (
-							<span className="absolute top-0.5 right-0.5 bg-black/50 px-1 text-[9px] text-white">
-								{post.mediaType === "VIDEO" ? "▶" : "▣"}
-							</span>
-						)}
-					</a>
-				))}
-				{posts.length === 0 && (
-					<div className="col-span-3 p-4 text-center text-[11px] opacity-70">
-						No posts found.
-					</div>
-				)}
-			</div>
-			<div className="mt-3 flex items-center justify-between rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
-				<span>{posts.length} posts from @dupont0k</span>
-				<a
-					className="text-[#0000cc] underline"
-					href="https://www.instagram.com/dupont0k/"
-					target="_blank"
-					rel="noopener noreferrer"
-				>
-					Open Profile ↗
-				</a>
-			</div>
 		</div>
 	);
 }
@@ -571,8 +467,6 @@ function SectionContent({
 					</div>
 				</form>
 			);
-		case "instagram":
-			return <InstagramGallery />;
 		case "secret":
 			return <GuestlistGame onOpenSection={onOpenSection} />;
 		case "spotifyAuth":
