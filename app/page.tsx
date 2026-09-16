@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { VideoPlayer, type Video } from "./video-player";
+import { SpotifyPlayer } from "./spotify-player";
 
 type Point = { x: number; y: number };
 
@@ -348,7 +349,8 @@ function InstagramGallery() {
 				<p className="mb-2 font-bold">Unable to load Instagram feed:</p>
 				<p>{error}</p>
 				<p className="mt-2 opacity-70">
-					Set INSTAGRAM_ACCESS_TOKEN in .env.local (Basic Display API, @dupont0k).
+					Set INSTAGRAM_ACCESS_TOKEN in dupontdoku-backend/.env (Basic Display API,
+					@dupont0k).
 				</p>
 			</div>
 		);
@@ -416,44 +418,7 @@ function SectionContent({
 }) {
 	switch (section) {
 		case "music":
-			return (
-				<div className="flex flex-col gap-1">
-					{[
-						"01. Teal Horizon",
-						"02. Dial-Up Dreams",
-						"03. Bevel & Bass",
-						"04. Screensaver",
-						"05. 56k Romance",
-					].map((track, i) => (
-						<div
-							key={track}
-							className="flex items-center justify-between rounded px-2 py-1 hover:bg-[#316ac5] hover:text-white"
-						>
-							<span>{track}</span>
-							<span className="text-[10px] opacity-60">3:5{i}</span>
-						</div>
-					))}
-					<div className="mt-3 flex items-center gap-2">
-						<button className="xp-btn px-3 text-[12px]">▶</button>
-						<button className="xp-btn px-3 text-[12px]">⏸</button>
-						<button className="xp-btn px-3 text-[12px]">⏹</button>
-						<div className="h-5 flex-1 rounded-sm border border-[#7f9db9] bg-white p-0.5">
-							<div className="flex h-full gap-0.5">
-								{Array.from({ length: 40 }).map((_, i) => (
-									<div
-										key={i}
-										className={`w-1 ${i < 13 ? "bg-[#3772d6]" : "bg-[#c8d8f0]"}`}
-									/>
-								))}
-							</div>
-						</div>
-					</div>
-					<div className="mt-3 flex items-center justify-between rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
-						<span>Now Playing: 01. Teal Horizon</span>
-						<span className="opacity-60">1:22 / 3:50</span>
-					</div>
-				</div>
-			);
+			return <SpotifyPlayer />;
 		case "tour":
 			return (
 				<div>
