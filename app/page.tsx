@@ -1,8 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { VideoPlayer, type Video } from "./video-player";
-import { SpotifyPlayer, SPOTIFY_CONNECTED_EVENT, SPOTIFY_AUTH_CLOSE_EVENT } from "./spotify-player";
+import {
+	SpotifyPlayer,
+	SPOTIFY_CONNECTED_EVENT,
+	SPOTIFY_AUTH_OPEN_EVENT,
+	SPOTIFY_AUTH_CLOSE_EVENT,
+} from "./spotify-player";
 
 type Point = { x: number; y: number };
 
@@ -10,8 +15,6 @@ type WinState = {
 	id: SectionId;
 	minimized: boolean;
 	maximized: boolean;
-	// temporary size override (used by the Spotify auth window to grow to fit)
-	sizeOverride?: { width: number; height: number };
 };
 
 type SectionId =
@@ -84,7 +87,6 @@ function DraggableWindow({
 	section,
 	minimized,
 	maximized,
-	sizeOverride,
 	onClose,
 	onMinimize,
 	onToggleMax,
@@ -96,7 +98,6 @@ function DraggableWindow({
 	section: SectionId;
 	minimized: boolean;
 	maximized: boolean;
-	sizeOverride?: { width: number; height: number };
 	onClose: () => void;
 	onMinimize: () => void;
 	onToggleMax: () => void;
@@ -136,15 +137,8 @@ function DraggableWindow({
 			style={{
 				left: maximized ? 0 : pos.x,
 				top: maximized ? 0 : pos.y,
-				width: maximized
-					? "100%"
-					: sizeOverride?.width ??
-						(section === "videos" || section === "spotifyAuth" ? 520 : 400),
-				height: maximized
-					? "calc(100% - 32px)"
-					: sizeOverride?.height !== undefined
-						? sizeOverride.height
-						: undefined,
+				width: maximized ? "100%" : section === "videos" ? 520 : section === "spotifyAuth" ? 460 : 400,
+				height: maximized ? "calc(100% - 32px)" : undefined,
 				zIndex: z,
 			}}
 			onPointerDown={onFocus}
@@ -321,76 +315,81 @@ function GuestlistGame({ onOpenSection }: { onOpenSection: (id: SectionId) => vo
 }
 
 function SpotifyAuthFrame() {
-	// closes the window when the OAuth flow completes (the callback page
-	// inside the iframe posts a "spotify-connected" message to its parent)
-	const [done, setDone] = useState(false);
-	const [displayName, setDisplayName] = useState("");
+	// This window is only shown after the silent connect flow failed, i.e.
+	// Spotify requires the user to click through its login page (which blocks
+	// framing, so it must be a popup). The button opens that popup; when the
+	// OAuth callback posts the result we notify the player and close.
+	const [waiting, setWaiting] = useState(false);
+	const popupRef = useRef<Window | null>(null);
 
-	// ask the desktop to resize this window and mark it as the auth window
+	const closeAll = useCallback(() => {
+		popupRef.current?.close();
+		window.dispatchEvent(new Event(SPOTIFY_AUTH_CLOSE_EVENT));
+	}, []);
+
+	const openLogin = useCallback(() => {
+		const popup = window.open("/api/spotify-auth/auth", "dupontdoku-spotify-auth", "width=480,height=720");
+		if (!popup) {
+			// popup blocked — fall back to a full-page navigation; a client-side
+			// route change would not follow the OAuth redirect properly
+			// eslint-disable-next-line @next/next/no-location-assign-relative-destination
+			window.location.assign("/api/spotify-auth/auth");
+			return;
+		}
+		popupRef.current = popup;
+		setWaiting(true);
+	}, []);
+
 	useEffect(() => {
-		window.dispatchEvent(
-			new CustomEvent("dupontdoku:spotify-auth-resize", { detail: { width: 520, height: 780 } }),
-		);
-
 		const onMessage = (e: MessageEvent) => {
-			let payload: { type?: string; displayName?: string } | null = null;
+			let payload: { type?: string } | null = null;
 			try {
 				payload =
 					typeof e.data === "string"
-						? (JSON.parse(e.data) as { type?: string; displayName?: string })
-						: (e.data as { type?: string; displayName?: string });
+						? (JSON.parse(e.data) as { type?: string })
+						: (e.data as { type?: string });
 			} catch {
 				return;
 			}
 			if (payload?.type === SPOTIFY_CONNECTED_EVENT) {
-				setDisplayName(payload.displayName ?? "");
-				setDone(true);
+				// tell the player to fetch a token, then close this window
+				window.dispatchEvent(new Event(SPOTIFY_CONNECTED_EVENT));
+				closeAll();
 			}
 		};
 		window.addEventListener("message", onMessage);
-		return () => window.removeEventListener("message", onMessage);
-	}, []);
-
-	// auto-close shortly after connecting
-	useEffect(() => {
-		if (!done) return;
-		const id = setTimeout(() => {
-			window.dispatchEvent(new MessageEvent("message", { data: SPOTIFY_AUTH_CLOSE_EVENT }));
-		}, 1500);
-		return () => clearTimeout(id);
-	}, [done]);
+		// if the user closes the popup without logging in, restore the button
+		const poll = setInterval(() => {
+			if (popupRef.current?.closed) setWaiting(false);
+		}, 500);
+		return () => {
+			window.removeEventListener("message", onMessage);
+			clearInterval(poll);
+		};
+	}, [closeAll]);
 
 	return (
 		<div className="flex h-full flex-col">
 			<div className="flex items-center gap-2 border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-0.5 text-[11px]">
-				<span className="rounded-sm border border-[#7f9db9] bg-white px-2 py-0.5">
-					https://accounts.spotify.com/authorize
-				</span>
-				<button
-					className="xp-btn px-2 py-0.5"
-					onClick={() =>
-						window.dispatchEvent(new MessageEvent("message", { data: SPOTIFY_AUTH_CLOSE_EVENT }))
-					}
-				>
+				<span className="rounded-sm border border-[#7f9db9] bg-white px-2 py-0.5">Spotify</span>
+				<button className="xp-btn px-2 py-0.5" onClick={closeAll}>
 					Close
 				</button>
 			</div>
-			{done ? (
-				<div className="flex flex-1 items-center justify-center bg-white text-[12px]">
-					✅ Connected{displayName ? ` as ${displayName}` : ""} — this window closes
-					automatically.
-				</div>
-			) : (
-				<iframe
-					src="/api/spotify-auth/auth"
-					title="Spotify login"
-					className="min-h-0 flex-1 border-0 bg-white"
-				/>
-			)}
+			<div className="flex flex-1 flex-col items-center justify-center gap-3 bg-white p-4 text-center">
+				<img src="/icons/48/music.png" alt="" className="h-12 w-12" />
+				<div className="text-[13px] font-bold">Connect your Spotify account</div>
+				<p className="max-w-64 text-[11px] leading-snug opacity-70">
+					Full-track playback uses your own Spotify Premium account. A Spotify login
+					window will open — this site never sees your password.
+				</p>
+				<button className="xp-btn px-4 py-1 text-[12px]" onClick={openLogin}>
+					{waiting ? "Waiting for login…" : "Open Spotify login"}
+				</button>
+			</div>
 		</div>
 	);
 }
-
 function SectionContent({
 	section,
 	onOpenSection,
@@ -557,34 +556,15 @@ export default function Home() {
 	// (instead of a browser popup)
 	useEffect(() => {
 		const onAuthOpen = () => openSection("spotifyAuth");
-		const onAuthResize = (e: Event) => {
-			// grow the auth window to fit the login page
-			const { width, height } = (e as CustomEvent<{ width: number; height: number }>).detail;
-			setWins((prev) =>
-				prev.map((w) =>
-					w.id === "spotifyAuth" ? { ...w, minimized: false, sizeOverride: { width, height } } : w,
-				),
-			);
-		};
 		const onAuthClose = () => {
 			setWins((prev) => prev.filter((w) => w.id !== "spotifyAuth"));
 		};
-		window.addEventListener("dupontdoku:spotify-auth-open", onAuthOpen);
-		window.addEventListener("dupontdoku:spotify-auth-resize", onAuthResize);
-		window.addEventListener("message", (e: MessageEvent) => {
-			let payload: { type?: string } | null = null;
-			try {
-				payload = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-			} catch {
-				return;
-			}
-			if (payload?.type === SPOTIFY_AUTH_CLOSE_EVENT) onAuthClose();
-		});
+		window.addEventListener(SPOTIFY_AUTH_OPEN_EVENT, onAuthOpen);
+		window.addEventListener(SPOTIFY_AUTH_CLOSE_EVENT, onAuthClose);
 		return () => {
-			window.removeEventListener("dupontdoku:spotify-auth-open", onAuthOpen);
-			window.removeEventListener("dupontdoku:spotify-auth-resize", onAuthResize);
+			window.removeEventListener(SPOTIFY_AUTH_OPEN_EVENT, onAuthOpen);
+			window.removeEventListener(SPOTIFY_AUTH_CLOSE_EVENT, onAuthClose);
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	const focusSection = (id: SectionId) => {
@@ -637,7 +617,6 @@ export default function Home() {
 					section={w.id}
 					minimized={w.minimized}
 					maximized={w.maximized}
-					sizeOverride={w.sizeOverride}
 					initial={{ x: 140 + i * 28, y: 40 + i * 28 }}
 					z={i + 1}
 					onClose={() => closeSection(w.id)}

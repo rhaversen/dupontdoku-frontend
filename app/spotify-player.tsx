@@ -73,17 +73,57 @@ function formatTime(seconds: number) {
 	return `${m}:${String(s % 60).padStart(2, "0")}`;
 }
 
-const POPUP_POLL_MS = 500;
-
-// event names for the desktop-window based auth flow
+// event names for the desktop-window based auth flow: the player asks the
+// desktop to open the auth window, and the auth window announces the result
 export const SPOTIFY_CONNECTED_EVENT = "dupontdoku:spotify-connected";
+export const SPOTIFY_AUTH_FAILED_EVENT = "dupontdoku:spotify-auth-failed";
 export const SPOTIFY_AUTH_OPEN_EVENT = "dupontdoku:spotify-auth-open";
 export const SPOTIFY_AUTH_CLOSE_EVENT = "dupontdoku:spotify-auth-close";
 
-// the OAuth callback page posts this payload when the flow completes
-export interface SpotifyConnectedMessage {
-	type: typeof SPOTIFY_CONNECTED_EVENT;
-	displayName: string;
+async function isConnected(): Promise<boolean> {
+	try {
+		const res = await fetch("/api/spotify-auth/status");
+		return ((await res.json()) as { connected: boolean }).connected;
+	} catch {
+		return false;
+	}
+}
+
+// Spotify's /authorize answers with an instant redirect back to our callback
+// when the visitor already granted the app — that roundtrip runs hidden in an
+// iframe on our own origin. Spotify's login page itself is frame-blocked
+// (x-frame-options: deny), so when interaction is needed nothing loads and
+// this times out; the caller then shows the visible auth window instead.
+function silentSpotifyAuth(timeoutMs = 3000): Promise<boolean> {
+	return new Promise((resolve) => {
+		const iframe = document.createElement("iframe");
+		iframe.style.display = "none";
+		let done = false;
+		const finish = (result: boolean) => {
+			if (done) return;
+			done = true;
+			window.removeEventListener("message", onMessage);
+			iframe.remove();
+			resolve(result);
+		};
+		const onMessage = (e: MessageEvent) => {
+			let payload: { type?: string } | null = null;
+			try {
+				payload =
+					typeof e.data === "string"
+						? (JSON.parse(e.data) as { type?: string })
+						: (e.data as { type?: string });
+			} catch {
+				return;
+			}
+			if (payload?.type === SPOTIFY_CONNECTED_EVENT) finish(true);
+			if (payload?.type === SPOTIFY_AUTH_FAILED_EVENT) finish(false);
+		};
+		window.addEventListener("message", onMessage);
+		iframe.src = "/api/spotify-auth/auth";
+		document.body.appendChild(iframe);
+		setTimeout(() => finish(false), timeoutMs);
+	});
 }
 
 export function SpotifyPlayer() {
@@ -97,19 +137,16 @@ export function SpotifyPlayer() {
 	const [playbackMode, setPlaybackMode] = useState<"loading" | "premium" | "link">("loading");
 	const [deviceReady, setDeviceReady] = useState(false);
 	const [needsLogin, setNeedsLogin] = useState(false);
-	// true once the backend reports an OAuth token — the user completed login
+	// true once the backend reports an OAuth token — the user completed login.
+	// Auth itself runs in the auth window; the player only reacts to its events.
 	const [authed, setAuthed] = useState(false);
-	// shown instead of the popup when the user is logged in but playback fails
-	const [playbackBlocked, setPlaybackBlocked] = useState(false);
-	const [popupOpen, setPopupOpen] = useState(false);
-	// bump when the user returns from Spotify login so we retry token fetch
+	// bump when the user completes login so the token/player setup re-runs
 	const [loginAttempt, setLoginAttempt] = useState(0);
 
 	const audioRef = useRef<HTMLAudioElement | null>(null);
 	const playerRef = useRef<SpotifyPlayer | null>(null);
 	const deviceIdRef = useRef<string | null>(null);
 	const tokenRef = useRef<string | null>(null);
-	const popupRef = useRef<Window | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -129,22 +166,12 @@ export function SpotifyPlayer() {
 		};
 	}, []);
 
-	// listen for the "connected" message from the auth window (popup or desktop iframe)
+	// the auth window fires this once the OAuth callback completes; re-run the
+	// token/player setup — if this browser is now connected we go premium
 	useEffect(() => {
-		const onMessage = (e: MessageEvent) => {
-			let payload: SpotifyConnectedMessage | null = null;
-			try {
-				payload = typeof e.data === "string" ? (JSON.parse(e.data) as SpotifyConnectedMessage) : (e.data as SpotifyConnectedMessage);
-			} catch {
-				return;
-			}
-			if (payload?.type === SPOTIFY_CONNECTED_EVENT) {
-				setPopupOpen(false);
-				setLoginAttempt((n) => n + 1);
-			}
-		};
-		window.addEventListener("message", onMessage);
-		return () => window.removeEventListener("message", onMessage);
+		const onConnected = () => setLoginAttempt((n) => n + 1);
+		window.addEventListener(SPOTIFY_CONNECTED_EVENT, onConnected);
+		return () => window.removeEventListener(SPOTIFY_CONNECTED_EVENT, onConnected);
 	}, []);
 
 	// The playback-token endpoint returns a Premium user's OAuth token after
@@ -194,7 +221,7 @@ export function SpotifyPlayer() {
 				});
 				player.addListener("initialization_error", () => {
 					setPlaybackMode("link");
-					if (authed) setPlaybackBlocked(true);
+					setNeedsLogin(true);
 				});
 				player.addListener("authentication_error", () => {
 					setPlaybackMode("link");
@@ -203,7 +230,6 @@ export function SpotifyPlayer() {
 				player.addListener("account_error", () => {
 					// account lacks Spotify Premium — login was fine, playback is not
 					setPlaybackMode("link");
-					setPlaybackBlocked(true);
 				});
 				await player.connect();
 			} catch {
@@ -218,10 +244,27 @@ export function SpotifyPlayer() {
 		};
 	}, [loginAttempt]);
 
-	const openAuthPopup = useCallback(() => {
-		// ask the desktop to open the auth window instead of a browser popup;
-		// page.tsx listens for this and opens "Connect Spotify - Internet Explorer"
-		window.dispatchEvent(new MessageEvent(SPOTIFY_AUTH_OPEN_EVENT));
+	// connect flow, fully invisible when possible: status check, then a hidden
+	// iframe OAuth roundtrip; the auth window only appears if Spotify actually
+	// needs the user to click through its login page
+	const connectingRef = useRef(false);
+	const connectSpotify = useCallback(async () => {
+		if (connectingRef.current) return;
+		connectingRef.current = true;
+		try {
+			if (await isConnected()) {
+				setLoginAttempt((n) => n + 1);
+				return;
+			}
+			if (await silentSpotifyAuth()) {
+				setLoginAttempt((n) => n + 1);
+				return;
+			}
+			// interaction required — show the auth window
+			window.dispatchEvent(new Event(SPOTIFY_AUTH_OPEN_EVENT));
+		} finally {
+			connectingRef.current = false;
+		}
 	}, []);
 
 	const track = tracks?.[current];
@@ -346,14 +389,11 @@ export function SpotifyPlayer() {
 			playBackendPreview(t);
 			return;
 		}
-		if (authed) {
-			// logged in but the SDK can't play (e.g. no Premium) — explain
-			// instead of re-opening the login popup every click
-			setPlaybackBlocked(true);
-			return;
+		if (!authed) {
+			// not connected — run the silent connect flow, show the auth window
+			// only if Spotify requires interaction
+			void connectSpotify();
 		}
-		// not logged in — open the login popup
-		openAuthPopup();
 	}
 
 	async function togglePlay() {
@@ -514,15 +554,6 @@ export function SpotifyPlayer() {
 					{formatTime(activeDurationSec)}
 				</span>
 			</div>
-			{playbackBlocked && playbackMode === "link" && (
-				<div className="mt-2 rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
-					<div className="font-bold">Spotify playback unavailable</div>
-					<div className="mt-0.5">
-						Your account is connected, but full-track playback requires Spotify Premium.
-						Use the Connect Spotify button in the Start menu to listen in the Spotify app.
-					</div>
-				</div>
-			)}
 			{needsLogin && playbackMode === "link" && (
 				<div className="mt-2 rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
 					<div className="font-bold">Play the full tracks right here</div>
@@ -530,14 +561,8 @@ export function SpotifyPlayer() {
 						Connect your own Spotify account (Premium required for full playback).
 						Each visitor uses their own account — nobody shares tokens.
 					</div>
-					<button className="xp-btn mt-1.5 px-3" onClick={openAuthPopup} disabled={popupOpen}>
-						{popupOpen ? "Waiting for login…" : "Connect Spotify"}
-					</button>
-					<button
-						className="xp-btn mt-1.5 ml-1 px-3"
-						onClick={() => setLoginAttempt((n) => n + 1)}
-					>
-						I&apos;ve connected — retry
+					<button className="xp-btn mt-1.5 px-3" onClick={() => void connectSpotify()}>
+						Connect Spotify
 					</button>
 				</div>
 			)}
@@ -575,6 +600,9 @@ export function SpotifyPlayer() {
 						className="text-[#0000cc] underline"
 						onClick={async () => {
 							await fetch("/api/spotify-auth/disconnect", { method: "POST" });
+							setAuthed(false);
+
+							setDeviceReady(false);
 							setLoginAttempt((n) => n + 1);
 						}}
 					>
