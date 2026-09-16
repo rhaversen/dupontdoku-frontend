@@ -5,7 +5,17 @@ import { VideoPlayer, type Video } from "./video-player";
 
 type Point = { x: number; y: number };
 
-type SectionId = "welcome" | "music" | "tour" | "tickets" | "about" | "instagram" | "videos";
+type WinState = { id: SectionId; minimized: boolean; maximized: boolean };
+
+type SectionId =
+	| "welcome"
+	| "music"
+	| "tour"
+	| "tickets"
+	| "about"
+	| "instagram"
+	| "videos"
+	| "secret";
 
 type IgPost = {
 	id: string;
@@ -17,13 +27,24 @@ type IgPost = {
 };
 
 const SECTIONS: Record<SectionId, { icon: string; title: string }> = {
-	welcome: { icon: "🏁", title: "Welcome" },
-	music: { icon: "🎵", title: "Music - Windows Media Player" },
-	tour: { icon: "🌍", title: "Tour Dates" },
-	tickets: { icon: "🎫", title: "Buy Tickets" },
-	about: { icon: "📄", title: "About Dupontdoku" },
-	instagram: { icon: "📷", title: "Instagram - dupont0k" },
-	videos: { icon: "🎬", title: "Videos - Media Player" },
+	welcome: { icon: "/icons/48/welcome.png", title: "Welcome" },
+	music: { icon: "/icons/48/music.png", title: "Music - Windows Media Player" },
+	tour: { icon: "/icons/48/tour.png", title: "Tour Dates" },
+	tickets: { icon: "/icons/48/tickets.png", title: "Buy Tickets" },
+	about: { icon: "/icons/48/readme.png", title: "README.TXT - Notepad" },
+	instagram: { icon: "/icons/48/instagram.png", title: "Instagram - dupont0k" },
+	videos: { icon: "/icons/48/videos.png", title: "Videos - Media Player" },
+	secret: { icon: "/icons/48/guestlist.png", title: "guestlist.exe" },
+};
+
+const LINKS = {
+	spotify: "https://open.spotify.com/artist/dupont",
+	unreleased: "https://soundcloud.com/dupont0k/sets/unreleased",
+	presave: "https://distrokid.com/hyperfollow/dupont/next",
+	doku: "https://dupont.doku",
+	sessions: "https://www.youtube.com/@dupontsessions",
+	articles: "https://gaaffa.dk/dupont",
+	email: "booking@dupontdoku.example",
 };
 
 const VIDEOS: Video[] = [
@@ -44,25 +65,42 @@ const VIDEOS: Video[] = [
 	},
 ];
 
-const MENU: { id: SectionId; label: string }[] = [
+const DESKTOP_ICONS: { id: SectionId; label: string }[] = [
+	{ id: "about", label: "README.TXT" },
 	{ id: "music", label: "Music" },
-	{ id: "tour", label: "Tour" },
-	{ id: "tickets", label: "Tickets" },
-	{ id: "about", label: "About" },
-	{ id: "instagram", label: "Instagram" },
 	{ id: "videos", label: "Videos" },
+	{ id: "tour", label: "Tour Dates" },
+	{ id: "tickets", label: "Tickets" },
+	{ id: "instagram", label: "Instagram" },
+];
+
+const START_LINKS: { icon: string; label: string; href: string }[] = [
+	{ icon: "/icons/48/music.png", label: "Spotify", href: LINKS.spotify },
+	{ icon: "/icons/48/tickets.png", label: "Pre-save the new single", href: LINKS.presave },
+	{ icon: "/icons/48/guestlist.png", label: "Unreleased music", href: LINKS.unreleased },
+	{ icon: "/icons/48/videos.png", label: "Sessions on YouTube", href: LINKS.sessions },
+	{ icon: "/icons/48/readme.png", label: "Articles", href: LINKS.articles },
+	{ icon: "/icons/48/tour.png", label: "dupont.doku", href: LINKS.doku },
 ];
 
 function DraggableWindow({
 	section,
+	minimized,
+	maximized,
 	onClose,
+	onMinimize,
+	onToggleMax,
 	onOpenSection,
 	onFocus,
 	z,
 	initial,
 }: {
 	section: SectionId;
+	minimized: boolean;
+	maximized: boolean;
 	onClose: () => void;
+	onMinimize: () => void;
+	onToggleMax: () => void;
 	onOpenSection: (id: SectionId) => void;
 	onFocus: () => void;
 	z: number;
@@ -74,11 +112,11 @@ function DraggableWindow({
 
 	const onTitlePointerDown = useCallback(
 		(e: React.PointerEvent<HTMLDivElement>) => {
-			if ((e.target as HTMLElement).closest("button")) return;
+			if ((e.target as HTMLElement).closest("button") || maximized) return;
 			e.currentTarget.setPointerCapture(e.pointerId);
 			setOffset({ x: e.clientX - pos.x, y: e.clientY - pos.y });
 		},
-		[pos],
+		[pos, maximized],
 	);
 
 	const onTitlePointerMove = useCallback(
@@ -91,52 +129,196 @@ function DraggableWindow({
 
 	const endDrag = useCallback(() => setOffset(null), []);
 
+	if (minimized) return null;
+
 	return (
 		<div
 			className="absolute flex flex-col"
 			style={{
-				left: pos.x,
-				top: pos.y,
-				width: section === "instagram" ? 460 : section === "videos" ? 520 : 400,
+				left: maximized ? 0 : pos.x,
+				top: maximized ? 0 : pos.y,
+				width: maximized
+					? "100%"
+					: section === "instagram"
+						? 460
+						: section === "videos"
+							? 520
+							: 400,
+				height: maximized ? "calc(100% - 32px)" : undefined,
 				zIndex: z,
 			}}
 			onPointerDown={onFocus}
 		>
-			<div className="xp-window">
+			<div className="xp-window flex h-full flex-col">
 				<div
 					className="xp-title"
 					onPointerDown={onTitlePointerDown}
 					onPointerMove={onTitlePointerMove}
 					onPointerUp={endDrag}
 					onPointerCancel={endDrag}
+					onDoubleClick={onToggleMax}
 				>
-					<span className="mr-1">{meta.icon}</span>
+					<span className="xp-title-icon mr-1">
+						{/* eslint-disable-next-line @next/next/no-img-element */}
+						<img src={meta.icon} alt="" className="h-4 w-4" />
+					</span>
 					<span className="flex-1 truncate">{meta.title}</span>
-					<button className="xp-title-btn min" aria-label="Minimize">
+					<button className="xp-title-btn min" aria-label="Minimize" onClick={onMinimize}>
 						<span className="-mt-1">_</span>
 					</button>
-					<button className="xp-title-btn max" aria-label="Maximize">
+					<button className="xp-title-btn max" aria-label="Maximize" onClick={onToggleMax}>
 						<span className="text-[10px]">▢</span>
 					</button>
 					<button className="xp-title-btn close ml-1" aria-label="Close" onClick={onClose}>
 						<span className="text-[14px]">✕</span>
 					</button>
 				</div>
-				<div className="flex items-center gap-4 border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-0.5 text-[11px]">
-					{MENU.map((m) => (
-						<button
-							key={m.id}
-							className="rounded px-2 py-0.5 hover:bg-[#316ac5] hover:text-white"
-							onClick={() => onOpenSection(m.id)}
-						>
-							{m.label}
-						</button>
-					))}
-				</div>
-				<div className="p-3">
-					<SectionContent section={section} />
+				<div className="min-h-0 flex-1 overflow-auto p-3">
+					<SectionContent section={section} onOpenSection={onOpenSection} />
 				</div>
 			</div>
+		</div>
+	);
+}
+
+const SOLUTION = [
+	[1, 2, 3, 4],
+	[3, 4, 1, 2],
+	[2, 1, 4, 3],
+	[4, 3, 2, 1],
+];
+
+const PUZZLE = [
+	[1, 0, 0, 4],
+	[0, 0, 1, 0],
+	[0, 1, 0, 0],
+	[4, 0, 0, 1],
+];
+
+function GuestlistGame({ onOpenSection }: { onOpenSection: (id: SectionId) => void }) {
+	const [grid, setGrid] = useState(() => PUZZLE.map((row) => [...row]));
+	const [entered, setEntered] = useState(false);
+	const solved = grid.every((row, r) => row.every((v, c) => v === SOLUTION[r][c]));
+
+	const cycle = (r: number, c: number) => {
+		if (PUZZLE[r][c] !== 0) return;
+		setGrid((prev) => {
+			const next = prev.map((row) => [...row]);
+			next[r][c] = (next[r][c] + 1) % 5;
+			return next;
+		});
+	};
+
+	if (entered) {
+		return (
+			<div className="xp-inset rounded-sm p-3 text-[11px]">
+				<p className="font-bold">You&apos;re on the list!</p>
+				<p className="mt-1">
+					Show this code at the door for a free guestlist spot (+1):
+				</p>
+				<p className="my-2 rounded-sm border border-[#7f9db9] bg-white py-2 text-center font-mono text-base tracking-[0.3em]">
+					DUPONT-4EVER
+				</p>
+				<p className="opacity-70">
+					While you wait: <a className="text-[#0000cc] underline" href={LINKS.presave} target="_blank" rel="noopener noreferrer">pre-save the new single</a>.
+				</p>
+			</div>
+		);
+	}
+
+	if (!solved) {
+		return (
+			<div>
+				<p className="mb-2 text-[11px]">
+					Solve the dupontdoku to unlock the guestlist. Click a cell to cycle 1-4. Each
+					row, column and 2×2 box needs 1-4 exactly once.
+				</p>
+				<div className="xp-inset inline-grid grid-cols-4 gap-0 rounded-sm bg-white p-1">
+					{grid.map((row, r) =>
+						row.map((v, c) => (
+							<button
+								key={`${r}-${c}`}
+								onClick={() => cycle(r, c)}
+								className={`flex h-11 w-11 items-center justify-center font-mono text-base ${
+									PUZZLE[r][c] !== 0
+										? "cursor-default text-[#316ac5]"
+										: "hover:bg-[#cde5ff]"
+									} ${c === 1 ? "border-r-2 border-r-[#7f9db9]" : ""} ${
+									r === 1 ? "border-b-2 border-b-[#7f9db9]" : ""
+								}`}
+							>
+								{v !== 0 ? v : ""}
+							</button>
+						)),
+					)}
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex flex-col gap-3">
+			<p className="text-[12px] font-bold">🎉 You solved it — welcome to the hidden gem.</p>
+			<form
+				className="flex flex-col gap-2"
+				onSubmit={(e) => {
+					e.preventDefault();
+					setEntered(true);
+				}}
+			>
+				<input required placeholder="Your name" className="xp-inset rounded-sm px-1 py-0.5 text-[12px]" />
+				<input
+					required
+					type="email"
+					placeholder="Your email"
+					className="xp-inset rounded-sm px-1 py-0.5 text-[12px]"
+				/>
+				<select className="xp-inset rounded-sm px-1 py-0.5 text-[12px]">
+					<option>Copenhagen - Vega</option>
+					<option>Berlin - Lido</option>
+					<option>Amsterdam - Paradiso</option>
+					<option>London - KOKO</option>
+				</select>
+				<button type="submit" className="xp-btn px-4">
+					Claim free guestlist ticket
+				</button>
+			</form>
+			<div className="xp-inset rounded-sm p-2">
+				<p className="mb-1 text-[11px] font-bold">What&apos;s new</p>
+				<p className="text-[11px]">
+					New single drops Friday. Unreleased demos are rotating on SoundCloud this week
+					only.
+				</p>
+			</div>
+			<div className="grid grid-cols-2 gap-1 text-[11px]">
+								<button className="xp-btn" onClick={() => onOpenSection("tour")}>
+					<img src="/icons/16/tour.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Tour dates
+					</button>
+					<button className="xp-btn" onClick={() => onOpenSection("instagram")}>
+						<img src="/icons/16/instagram.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Concert photos
+					</button>
+					<a className="xp-btn text-center" href={LINKS.spotify} target="_blank" rel="noopener noreferrer">
+						<img src="/icons/16/music.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Spotify
+					</a>
+					<a className="xp-btn text-center" href={LINKS.unreleased} target="_blank" rel="noopener noreferrer">
+						<img src="/icons/16/guestlist.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Unreleased music
+					</a>
+					<a className="xp-btn text-center" href={LINKS.presave} target="_blank" rel="noopener noreferrer">
+						<img src="/icons/16/tickets.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Pre-save
+					</a>
+					<a className="xp-btn text-center" href={LINKS.sessions} target="_blank" rel="noopener noreferrer">
+						<img src="/icons/16/videos.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Sessions (YouTube)
+					</a>
+					<a className="xp-btn text-center" href={LINKS.doku} target="_blank" rel="noopener noreferrer">
+						<img src="/icons/16/readme.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> dupont.doku
+					</a>
+					<a className="xp-btn text-center" href={LINKS.articles} target="_blank" rel="noopener noreferrer">
+						<img src="/icons/16/tour.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Articles
+					</a>
+			</div>
+			<a className="text-[11px] text-[#0000cc] underline" href={`mailto:${LINKS.email}`}>
+				Get in touch: {LINKS.email}
+			</a>
 		</div>
 	);
 }
@@ -225,7 +407,13 @@ function InstagramGallery() {
 	);
 }
 
-function SectionContent({ section }: { section: SectionId }) {
+function SectionContent({
+	section,
+	onOpenSection,
+}: {
+	section: SectionId;
+	onOpenSection: (id: SectionId) => void;
+}) {
 	switch (section) {
 		case "music":
 			return (
@@ -334,33 +522,42 @@ function SectionContent({ section }: { section: SectionId }) {
 			);
 		case "instagram":
 			return <InstagramGallery />;
+		case "secret":
+			return <GuestlistGame onOpenSection={onOpenSection} />;
 		case "videos":
 			return <VideoPlayer videos={VIDEOS} />;
 		case "about":
 			return (
-				<div className="xp-inset h-48 overflow-auto rounded-sm p-2 font-mono text-[11px] whitespace-pre-wrap">
-					{`DUPONTDOKU - README.TXT
+				<div className="flex h-full flex-col">
+					<div className="min-h-48 flex-1 overflow-auto bg-white p-2 font-mono text-[11px] whitespace-pre-wrap">
+						{`DUPONTDOKU - README.TXT
 
 Genre: lo-fi synth / bedroom pop
 Formed: 2019, Aarhus DK
 
+psst... type the name of this site anywhere on the page.
+
 Contact: booking@dupontdoku.example
 `}
+					</div>
 				</div>
 			);
 		default:
 			return (
 				<div>
 					<div className="flex gap-3">
-						<div className="text-3xl leading-none">🏁</div>
+						<div className="text-3xl leading-none">
+							<img src="/icons/16/welcome.png" alt="" className="inline h-9 w-9" />
+						</div>
 						<p className="flex-1">
-						Welcome to Dupontdoku XP. Use the Start menu to explore music, tour dates
-						and tickets.
+						Welcome to Dupontdoku XP. Click the icons on the desktop to explore music,
+						tour dates, tickets and more.
 					</p>
 				</div>
 				<div className="xp-inset mt-3 rounded-sm p-2 font-mono text-[11px]">
 					C:\&gt; echo hello, world_
 				</div>
+				<p className="mt-2 text-[10px] opacity-50">there is a hidden gem on this desktop…</p>
 				<div className="mt-3 flex justify-end">
 					<button className="xp-btn px-4">OK</button>
 					</div>
@@ -371,7 +568,7 @@ Contact: booking@dupontdoku.example
 
 export default function Home() {
 	const [startOpen, setStartOpen] = useState(false);
-	const [open, setOpen] = useState<SectionId[]>(["welcome"]);
+	const [wins, setWins] = useState<WinState[]>([{ id: "welcome", minimized: false, maximized: false }]);
 	const [clock, setClock] = useState("");
 
 	useEffect(() => {
@@ -382,28 +579,90 @@ export default function Home() {
 		return () => clearInterval(id);
 	}, []);
 
+	useEffect(() => {
+		let buf = "";
+		const onKey = (e: KeyboardEvent) => {
+			const tag = (e.target as HTMLElement | null)?.tagName;
+			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+			buf = (buf + e.key.toLowerCase()).slice(-6);
+			if (buf === "dupont") {
+				setWins((prev) =>
+					prev.some((w) => w.id === "secret")
+						? prev.map((w) => (w.id === "secret" ? { ...w, minimized: false } : w))
+						: [...prev, { id: "secret", minimized: false, maximized: false }],
+				);
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, []);
+
 	const openSection = (id: SectionId) => {
-		setOpen((prev) => (prev.includes(id) ? prev : [...prev, id]));
+		setWins((prev) =>
+			prev.some((w) => w.id === id)
+				? prev.map((w) => (w.id === id ? { ...w, minimized: false } : w))
+				: [...prev, { id, minimized: false, maximized: false }],
+		);
 		setStartOpen(false);
 	};
 
 	const focusSection = (id: SectionId) => {
-		setOpen((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((s) => s !== id), id]));
+		setWins((prev) =>
+			prev[prev.length - 1]?.id === id
+				? prev
+				: [...prev.filter((w) => w.id !== id), prev.find((w) => w.id === id)!],
+		);
 	};
 
-	const startItems: SectionId[] = ["music", "videos", "tour", "tickets", "about", "instagram"];
+	const minimizeSection = (id: SectionId) => {
+		setWins((prev) => prev.map((w) => (w.id === id ? { ...w, minimized: true } : w)));
+	};
+
+	const toggleMaxSection = (id: SectionId) => {
+		setWins((prev) => prev.map((w) => (w.id === id ? { ...w, maximized: !w.maximized } : w)));
+	};
+
+	const closeSection = (id: SectionId) => {
+		setWins((prev) => prev.filter((w) => w.id !== id));
+	};
 
 	return (
 		<div className="relative h-full w-full overflow-hidden">
-			{open.map((id, i) => (
+			<div className="absolute top-2 left-2 flex flex-col gap-1">
+				{DESKTOP_ICONS.map(({ id, label }) => (
+					<button
+						key={id}
+						className="flex w-20 flex-col items-center gap-1 rounded p-2 text-center hover:bg-[#316ac5]/40 focus:bg-[#316ac5]/60 focus:outline-none"
+						onDoubleClick={() => openSection(id)}
+					>
+						<img
+							src={SECTIONS[id].icon}
+							alt=""
+							className="h-9 w-9 drop-shadow-[1px_1px_2px_rgba(0,0,0,0.6)]"
+						/>
+						<span
+							className="rounded px-1 text-[11px] leading-tight text-white"
+							style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.9)" }}
+						>
+							{label}
+						</span>
+					</button>
+				))}
+			</div>
+
+			{wins.map((w, i) => (
 				<DraggableWindow
-					key={id}
-					section={id}
-					initial={{ x: 60 + i * 28, y: 40 + i * 28 }}
+					key={w.id}
+					section={w.id}
+					minimized={w.minimized}
+					maximized={w.maximized}
+					initial={{ x: 140 + i * 28, y: 40 + i * 28 }}
 					z={i + 1}
-					onClose={() => setOpen((prev) => prev.filter((s) => s !== id))}
+					onClose={() => closeSection(w.id)}
+					onMinimize={() => minimizeSection(w.id)}
+					onToggleMax={() => toggleMaxSection(w.id)}
 					onOpenSection={openSection}
-					onFocus={() => focusSection(id)}
+					onFocus={() => focusSection(w.id)}
 				/>
 			))}
 
@@ -413,10 +672,21 @@ export default function Home() {
 						<span>🪟</span> start
 					</button>
 					<div className="flex flex-1 items-center gap-1">
-						{open.map((id) => (
-							<div key={id} className="xp-task-btn">
-								{SECTIONS[id].icon} {SECTIONS[id].title.split(" - ")[0]}
-							</div>
+						{wins.map((w) => (
+							<button
+								key={w.id}
+								className={`xp-task-btn ${w.minimized ? "opacity-70" : ""}`}
+								onClick={() =>
+									w.minimized
+										? openSection(w.id)
+										: wins[wins.length - 1]?.id === w.id
+											? minimizeSection(w.id)
+											: focusSection(w.id)
+								}
+							>
+								<img src={SECTIONS[w.id].icon} alt="" className="mr-1 inline h-3.5 w-3.5" />
+						{SECTIONS[w.id].title.split(" - ")[0]}
+							</button>
 						))}
 					</div>
 					<div className="xp-tray flex h-full items-center gap-2 text-[11px]">
@@ -439,23 +709,59 @@ export default function Home() {
 					</div>
 					<div className="flex-1 bg-[#ece9d8]">
 						<div className="p-1">
-							{startItems.map((id) => (
-								<button
-									key={id}
+							<button
+								className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-bold hover:bg-[#316ac5] hover:text-white"
+								onClick={() => openSection("welcome")}
+							>
+								<img src="/icons/16/welcome.png" alt="" className="h-5 w-5" /> Welcome
+							</button>
+							<button
+								className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
+								onClick={() => openSection("secret")}
+							>
+								<img src="/icons/16/guestlist.png" alt="" className="h-5 w-5" /> guestlist.exe
+							</button>
+						</div>
+						<div className="mx-1 border-t border-[#d5d2c8]" />
+						<div className="p-1">
+							{START_LINKS.map(({ icon, label, href }) => (
+								<a
+									key={label}
 									className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
-									onClick={() => openSection(id)}
+									href={href}
+									target="_blank"
+									rel="noopener noreferrer"
 								>
-									<span className="text-lg">{SECTIONS[id].icon}</span>
-									{SECTIONS[id].title.split(" - ")[0]}
-								</button>
+									<img src={icon} alt="" className="h-5 w-5" />
+									{label} <span className="ml-auto opacity-60">↗</span>
+								</a>
 							))}
+							<a
+								className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
+								href={`mailto:${LINKS.email}`}
+							>
+								<span className="flex h-5 w-5 items-center justify-center text-[13px]">✉️</span> Get
+						in touch
+							</a>
 						</div>
 						<div className="mx-1 border-t border-[#d5d2c8]" />
 						<div className="flex items-center justify-between bg-linear-to-r from-[#e6e3d3] to-[#ece9d8] p-1.5">
-							<button className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-[#316ac5] hover:text-white">
+							<button
+								className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-[#316ac5] hover:text-white"
+								onClick={() => {
+									setWins((prev) => prev.map((w) => ({ ...w, minimized: true })));
+									setStartOpen(false);
+								}}
+							>
 								<span className="text-lg">🔑</span> Log Off
 							</button>
-							<button className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-[#316ac5] hover:text-white">
+							<button
+								className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-[#316ac5] hover:text-white"
+								onClick={() => {
+									setWins([]);
+									setStartOpen(false);
+								}}
+							>
 								<span className="text-lg">⏻</span> Turn Off Computer
 							</button>
 						</div>
