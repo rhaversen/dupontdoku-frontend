@@ -176,12 +176,15 @@ export function BootScreen({ onComplete }: { onComplete: (code: string) => void 
 				<p className="mt-2 text-[11px] opacity-70">
 					{progress.completed}/{progress.required ?? 10} — estimated time remaining: {remainingLabel}
 				</p>
-				{nextRevealAt && phase === "waiting" && (
-					<p className="mt-1 text-[10px] opacity-50">
-						Next update in {formatRemaining(Math.max(0, nextRevealAt - now))}
-					</p>
-				)}
-				{respondError && <p className="mt-1 text-[10px] text-red-400">Click rejected: {respondError}</p>}
+				{/* fixed-height status slots so the panel never re-centers mid-game
+				    (a layout shift would move the dialog after the server sent its
+				    position, desyncing the click coordinates) */}
+				<p className="mt-1 h-4 text-[10px] opacity-50">
+					{nextRevealAt && phase === "waiting" && <>Next update in {formatRemaining(Math.max(0, nextRevealAt - now))}</>}
+				</p>
+				<p className="h-4 text-[10px] text-red-400">
+					{respondError && <>Click rejected: {respondError}</>}
+				</p>
 			</div>
 			{phase === "challenge" && challenge && (
 				<ChallengeDialog challenge={challenge} onRespond={respond} />
