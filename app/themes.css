@@ -1,0 +1,456 @@
+/* Theme bridge for the main page.
+	 The theme classes (t-mac, t-amiga, t-next, t-fict) are applied to <html>
+	 by the ThemeProvider; the core reskins live in mock.css (imported below).
+	 These rules bridge the rest: wallpaper, XP chrome classes, and content
+	 colors so the whole page follows the active theme. */
+
+@import "./themes/base.css";
+@import "./themes/static-mocks.css";
+
+/* ---- wallpaper + base font while a theme is active ---- */
+html:has(.t-mac) body,
+html.t-mac body {
+	background:
+		repeating-conic-gradient(#9aa89c 0% 25%, #8d9b90 0% 50%) 0 0 / 4px 4px,
+		#8d9b90;
+	font-family: Verdana, Geneva, Tahoma, sans-serif;
+}
+
+html:has(.t-amiga) body,
+html.t-amiga body {
+	background: #0055aa;
+	font-family: "Courier New", Courier, monospace;
+	font-weight: bold;
+}
+
+html:has(.t-next) body,
+html.t-next body {
+	background:
+		repeating-linear-gradient(45deg, #2e2e34 0 2px, #29292f 2px 4px),
+		#2e2e34;
+	font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+html:has(.t-fict) body,
+html.t-fict body {
+	background:
+		radial-gradient(ellipse at 50% 120%, #7a4a2c 0%, transparent 55%),
+		radial-gradient(ellipse at 80% -10%, #3a5a4c 0%, transparent 50%),
+		linear-gradient(#8a6a4c, #6a4a34);
+	font-family: Verdana, Geneva, Tahoma, sans-serif;
+}
+
+/* ---- window chrome restyle per theme ---- */
+/* MAC */
+html.t-mac .xp-window {
+	background: #d4d0c8;
+	border-radius: 0;
+	border: 1px solid #000;
+	box-shadow:
+		inset -1px -1px 0 #7a766c,
+		inset 1px 1px 0 #fff,
+		4px 4px 0 rgba(0, 0, 0, 0.35);
+}
+html.t-mac .xp-window.focused {
+	box-shadow:
+		inset -1px -1px 0 #7a766c,
+		inset 1px 1px 0 #fff,
+		6px 6px 0 rgba(0, 0, 0, 0.45);
+}
+html.t-mac .xp-title,
+html.t-mac .xp-title.inactive {
+	height: 22px;
+	padding: 0 4px;
+	border-radius: 0;
+	border: 1px solid #000;
+	background: #fff;
+	color: #111;
+	text-shadow: none;
+	position: relative;
+}
+html.t-mac .xp-title::before {
+	content: "";
+	position: absolute;
+	inset: 4px 22px;
+	background: repeating-linear-gradient(
+		to bottom,
+		#000 0 1px,
+		transparent 1px 3px
+	);
+	opacity: 0.85;
+}
+html.t-mac .xp-title > * {
+	position: relative;
+	z-index: 1;
+}
+html.t-mac .xp-title-icon img {
+	filter: grayscale(1) contrast(1.2);
+}
+html.t-mac .xp-title .flex-1 {
+	margin: 0 auto;
+	padding: 0 8px;
+	background: #fff;
+	font-size: 12px;
+	text-align: center;
+}
+html.t-mac .xp-title-btn {
+	border-radius: 0;
+	border: 1px solid #000;
+	background: #d4d0c8;
+	box-shadow:
+		inset 1px 1px 0 #fff,
+		inset -1px -1px 0 #7a766c;
+	color: #111;
+	width: 14px;
+	height: 14px;
+	font-size: 9px;
+}
+html.t-mac .xp-title-btn.min,
+html.t-mac .xp-title-btn.max,
+html.t-mac .xp-title-btn.min:hover,
+html.t-mac .xp-title-btn.max:hover {
+	background: #d4d0c8;
+}
+html.t-mac .xp-title-btn.close,
+html.t-mac .xp-title-btn.close:hover {
+	background: #d4d0c8;
+}
+html.t-mac .xp-btn {
+	border-radius: 0;
+	border: 1px solid #000;
+	background: #d4d0c8;
+	box-shadow:
+		inset 1px 1px 0 #fff,
+		inset -1px -1px 0 #7a766c;
+}
+html.t-mac .xp-btn:hover {
+	border-color: #000;
+	box-shadow:
+		inset 1px 1px 0 #fff,
+		inset -1px -1px 0 #7a766c;
+}
+html.t-mac .xp-btn:active {
+	background: #c2beb4;
+	box-shadow:
+		inset -1px -1px 0 #fff,
+		inset 1px 1px 0 #7a766c;
+}
+html.t-mac .xp-inset {
+	border-radius: 0;
+	border: 1px solid #000;
+	box-shadow:
+		inset -1px -1px 0 #fff,
+		inset 1px 1px 0 #7a766c;
+}
+html.t-mac .xp-taskbar {
+	height: 28px;
+	background: #d4d0c8;
+	border-top: 1px solid #000;
+	box-shadow: inset 0 1px 0 #fff;
+}
+html.t-mac .xp-start-btn {
+	border-radius: 0;
+	background: #d4d0c8;
+	border: 1px solid #000;
+	box-shadow:
+		inset 1px 1px 0 #fff,
+		inset -1px -1px 0 #7a766c;
+	color: #111;
+	font-style: normal;
+	text-shadow: none;
+}
+html.t-mac .xp-start-btn:hover {
+	background: #e2dfd7;
+}
+html.t-mac .xp-task-btn {
+	border-radius: 0;
+	background: #d4d0c8;
+	border: 1px solid #000;
+	box-shadow:
+		inset 1px 1px 0 #fff,
+		inset -1px -1px 0 #7a766c;
+	color: #111;
+}
+html.t-mac .xp-task-btn:hover,
+html.t-mac .xp-task-btn.active {
+	background: #e2dfd7;
+	filter: none;
+	color: #111;
+}
+html.t-mac .xp-tray {
+	background: #d4d0c8;
+	border-left: 1px solid #000;
+	color: #333;
+}
+
+/* AMIGA */
+html.t-amiga .xp-window {
+	background: #b0b0b0;
+	border-radius: 0;
+	border: 2px solid;
+	border-color: #fff #000 #000 #fff;
+	box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.45);
+	color: #000;
+}
+html.t-amiga .xp-title,
+html.t-amiga .xp-title.inactive {
+	height: 20px;
+	border-radius: 0;
+	background: #ff8800;
+	border-bottom: 2px solid #000;
+	color: #000;
+	text-shadow: none;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	font-size: 12px;
+}
+html.t-amiga .xp-title-btn {
+	border-radius: 0;
+	background: #b0b0b0;
+	border: 1px solid;
+	border-color: #fff #000 #000 #fff;
+	color: #000;
+	width: 16px;
+	height: 14px;
+	font-size: 10px;
+}
+html.t-amiga .xp-title-btn.min,
+html.t-amiga .xp-title-btn.max,
+html.t-amiga .xp-title-btn.close {
+	background: #b0b0b0;
+}
+html.t-amiga .xp-btn {
+	border-radius: 0;
+	background: #b0b0b0;
+	border: 2px solid;
+	border-color: #fff #000 #000 #fff;
+	color: #000;
+	text-transform: uppercase;
+	font-size: 12px;
+}
+html.t-amiga .xp-btn:hover {
+	border-color: #fff #000 #000 #fff;
+	box-shadow: none;
+}
+html.t-amiga .xp-btn:active {
+	border-color: #000 #fff #fff #000;
+	background: #b0b0b0;
+}
+html.t-amiga .xp-inset {
+	border-radius: 0;
+	background: #fff;
+	border: 2px solid;
+	border-color: #000 #fff #fff #000;
+	color: #000;
+}
+html.t-amiga .xp-taskbar {
+	height: 24px;
+	background: #b0b0b0;
+	border-top: 2px solid #fff;
+}
+html.t-amiga .xp-start-btn {
+	border-radius: 0;
+	background: #ff8800;
+	border: 2px solid;
+	border-color: #fff #000 #000 #fff;
+	color: #000;
+	font-style: normal;
+	text-transform: uppercase;
+	text-shadow: none;
+	font-size: 12px;
+}
+html.t-amiga .xp-task-btn {
+	border-radius: 0;
+	background: #b0b0b0;
+	border: 2px solid;
+	border-color: #fff #000 #000 #fff;
+	color: #000;
+	text-transform: uppercase;
+}
+html.t-amiga .xp-task-btn:hover,
+html.t-amiga .xp-task-btn.active {
+	background: #ff8800;
+	filter: none;
+}
+html.t-amiga .xp-tray {
+	background: #b0b0b0;
+	border-left: 2px solid #fff;
+	color: #000;
+}
+
+/* NEXT */
+html.t-next .xp-window {
+	background: #5a5a5a;
+	border-radius: 0;
+	border: 2px solid #000;
+	box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.55);
+	color: #ddd;
+}
+html.t-next .xp-title,
+html.t-next .xp-title.inactive {
+	height: 26px;
+	border-radius: 0;
+	background: linear-gradient(to bottom, #999, #6e6e6e);
+	border-bottom: 2px solid #000;
+	color: #111;
+	text-shadow: none;
+	font-weight: 500;
+	letter-spacing: 0.5px;
+}
+html.t-next .xp-title-btn {
+	border-radius: 0;
+	background: #c8c8c8;
+	border: 1px solid #000;
+	color: #333;
+	width: 18px;
+	height: 16px;
+	font-size: 10px;
+}
+html.t-next .xp-title-btn.min,
+html.t-next .xp-title-btn.max,
+html.t-next .xp-title-btn.close {
+	background: #c8c8c8;
+}
+html.t-next .xp-btn {
+	border-radius: 0;
+	background: linear-gradient(to bottom, #909090, #6a6a6a);
+	border: 1px solid #000;
+	color: #eee;
+}
+html.t-next .xp-btn:hover {
+	border-color: #000;
+	box-shadow: none;
+	filter: brightness(1.1);
+}
+html.t-next .xp-btn:active {
+	background: #555;
+}
+html.t-next .xp-inset {
+	border-radius: 0;
+	background: #1c1c1c;
+	border: 1px solid #000;
+	box-shadow:
+		inset 1px 1px 0 rgba(0, 0, 0, 0.8),
+		0 1px 0 rgba(255, 255, 255, 0.15);
+	color: #9fe89f;
+	font-family: "Courier New", monospace;
+}
+html.t-next .xp-taskbar {
+	height: 30px;
+	background: linear-gradient(to bottom, #777, #4c4c4c);
+	border-top: 2px solid #000;
+}
+html.t-next .xp-start-btn {
+	border-radius: 0;
+	background: linear-gradient(to bottom, #909090, #6a6a6a);
+	border: 1px solid #000;
+	color: #eee;
+	font-style: normal;
+	text-shadow: none;
+}
+html.t-next .xp-task-btn {
+	border-radius: 0;
+	background: #666;
+	border: 1px solid #000;
+	box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.2);
+	color: #eee;
+}
+html.t-next .xp-task-btn:hover,
+html.t-next .xp-task-btn.active {
+	background: #7a7a7a;
+	filter: none;
+}
+html.t-next .xp-tray {
+	background: #666;
+	border-left: 1px solid #000;
+	color: #eee;
+}
+
+/* FICT */
+html.t-fict .xp-window {
+	background: #d6d2c4;
+	border-radius: 0;
+	border: 2px solid;
+	border-color: #f2efe6 #55504a #55504a #f2efe6;
+	outline: 1px solid #2c2a26;
+	box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.4);
+	color: #1c1a16;
+}
+html.t-fict .xp-title,
+html.t-fict .xp-title.inactive {
+	height: 24px;
+	border-radius: 0;
+	background: linear-gradient(to bottom, #9c4a85, #6b2d5c 50%, #4a1d40);
+	color: #fff;
+	text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+html.t-fict .xp-title-btn {
+	border-radius: 0;
+	background: #d6d2c4;
+	border: 2px solid;
+	border-color: #f2efe6 #55504a #55504a #f2efe6;
+	color: #1c1a16;
+	width: 18px;
+	height: 17px;
+	font-size: 10px;
+}
+html.t-fict .xp-title-btn.close,
+html.t-fict .xp-title-btn.close:hover {
+	background: #e8a33d;
+}
+html.t-fict .xp-btn {
+	border-radius: 0;
+	background: #d6d2c4;
+	border: 2px solid;
+	border-color: #f2efe6 #55504a #55504a #f2efe6;
+	outline: 1px solid #2c2a26;
+	color: #1c1a16;
+}
+html.t-fict .xp-btn:hover {
+	border-color: #f2efe6 #55504a #55504a #f2efe6;
+	box-shadow: none;
+}
+html.t-fict .xp-btn:active {
+	border-color: #55504a #f2efe6 #f2efe6 #55504a;
+}
+html.t-fict .xp-inset {
+	border-radius: 0;
+	background: #fbf9f2;
+	border: 2px solid;
+	border-color: #55504a #f2efe6 #f2efe6 #55504a;
+	color: #1c1a16;
+}
+html.t-fict .xp-taskbar {
+	height: 32px;
+	background: linear-gradient(to bottom, #9c4a85, #6b2d5c 60%, #4a1d40);
+	border-top: 1px solid #e8a33d;
+	box-shadow: none;
+}
+html.t-fict .xp-start-btn {
+	border-radius: 0;
+	background: linear-gradient(to bottom, #f4c26a, #e8a33d 60%, #b5752a);
+	border: 2px solid;
+	border-color: #ffe4ad #7a4e14 #7a4e14 #ffe4ad;
+	color: #3a2408;
+	font-style: normal;
+	text-shadow: none;
+}
+html.t-fict .xp-task-btn {
+	border-radius: 0;
+	background: rgba(255, 255, 255, 0.12);
+	border: 1px solid rgba(255, 255, 255, 0.35);
+	color: #fff;
+}
+html.t-fict .xp-task-btn:hover {
+	background: rgba(255, 255, 255, 0.2);
+	filter: none;
+}
+html.t-fict .xp-task-btn.active {
+	background: rgba(0, 0, 0, 0.25);
+	border-color: #e8a33d;
+}
+html.t-fict .xp-tray {
+	background: rgba(0, 0, 0, 0.25);
+	border-left: 1px solid #e8a33d;
+	color: #fff;
+}

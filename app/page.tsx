@@ -9,6 +9,7 @@ import {
 	SPOTIFY_AUTH_CLOSE_EVENT,
 } from "./spotify-player";
 import AuthWindow from "./auth-window";
+import ThemePicker from "./theme-picker";
 import { BootScreen } from "./boot-screen";
 import { GuestlistDesktop } from "./guestlist-desktop";
 import { useAuth } from "./lib/auth";
@@ -244,13 +245,13 @@ function DraggableWindow({
 						<img src={meta.icon} alt="" className="h-4 w-4" />
 					</span>
 					<span className="flex-1 truncate">{meta.title}</span>
-						<button className="xp-title-btn min" aria-label="Minimize" onPointerDown={(e) => { e.preventDefault(); onMinimize(); }}>
-							<span className="-mt-1">_</span>
-						</button>
-						<button className="xp-title-btn max" aria-label="Maximize" onPointerDown={(e) => { e.preventDefault(); onToggleMax(); }}>
-							<span className="text-[10px]">▢</span>
-						</button>
-						<button className="xp-title-btn close ml-1" aria-label="Close" onPointerDown={(e) => { e.preventDefault(); onClose(); }}>
+					<button className="xp-title-btn min" aria-label="Minimize" onPointerDown={(e) => { e.preventDefault(); onMinimize(); }}>
+						<span className="-mt-1">_</span>
+					</button>
+					<button className="xp-title-btn max" aria-label="Maximize" onPointerDown={(e) => { e.preventDefault(); onToggleMax(); }}>
+						<span className="text-[10px]">▢</span>
+					</button>
+					<button className="xp-title-btn close ml-1" aria-label="Close" onPointerDown={(e) => { e.preventDefault(); onClose(); }}>
 						<span className="text-[14px]">✕</span>
 					</button>
 				</div>
@@ -812,7 +813,7 @@ export default function Home() {
 			.then((data: { guest: { name: string } | null }) => {
 				if (data.guest) setPowerState("guestlist");
 			})
-			.catch(() => {});
+			.catch(() => { });
 	}, []);
 
 	const openSection = (id: SectionId) => {
@@ -820,17 +821,17 @@ export default function Home() {
 			prev.some((w) => w.id === id)
 				? prev.map((w) => (w.id === id ? { ...w, minimized: false } : w))
 				: [
-						...prev,
-						{
-							id,
-							minimized: false,
-							maximized: false,
-							slot: nextSlotRef.current++,
-							// only windows opened after load get a random spot;
-							// defaults keep their row slot
-							manualPos: randomPosition(),
-						},
-					],
+					...prev,
+					{
+						id,
+						minimized: false,
+						maximized: false,
+						slot: nextSlotRef.current++,
+						// only windows opened after load get a random spot;
+						// defaults keep their row slot
+						manualPos: randomPosition(),
+					},
+				],
 		);
 		bringToFront(id);
 		setStartOpen(false);
@@ -976,6 +977,7 @@ export default function Home() {
 						})}
 					</div>
 					<TaskbarAuth onOpenAdmin={() => openSection("admin")} />
+					<ThemePicker />
 					<div className="xp-tray flex h-full items-center gap-2 text-[11px]">
 						<span title="Volume">🔊</span>
 						<span title="Network">📶</span>
