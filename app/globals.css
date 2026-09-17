@@ -5,6 +5,8 @@
 	--xp-bg: #ece9d8;
 	--xp-blue: #0058e6;
 	--xp-blue-dark: #0055ea;
+	/* single knob for the whole desktop scale (windows, text, icons, taskbar) */
+	--desktop-scale: 1.25;
 }
 
 html,

@@ -901,7 +901,10 @@ export default function Home() {
 	}
 
 	return (
-		<div className="relative h-full w-full overflow-hidden">
+		<div
+			className="relative h-full w-full overflow-hidden"
+			style={{ zoom: "var(--desktop-scale)" }}
+		>
 			<div className="absolute top-2 left-2 flex flex-col gap-1">
 				<DesktopIcon icon="/icons/48/readme.png" label="README.TXT" onOpen={() => openSection("about")} />
 				<DesktopIcon icon="/icons/48/music.png" label="Music" onOpen={() => openSection("music")} />
