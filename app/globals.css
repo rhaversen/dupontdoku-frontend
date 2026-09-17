@@ -27,7 +27,26 @@ body {
 	border: 1px solid #0831d9;
 	box-shadow:
 		0 0 0 1px rgba(255, 255, 255, 0.25),
-		3px 3px 10px rgba(0, 0, 0, 0.45);
+		2px 2px 8px rgba(0, 0, 0, 0.35);
+	animation: xp-window-open 90ms ease-out;
+}
+
+@keyframes xp-window-open {
+	from {
+		opacity: 0.6;
+		transform: scale(0.97);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+/* focused window casts a deeper shadow, like XP's active window glow */
+.xp-window.focused {
+	box-shadow:
+		0 0 0 1px rgba(255, 255, 255, 0.3),
+		4px 4px 14px rgba(0, 0, 0, 0.5);
 }
 
 .xp-title {
@@ -181,10 +200,36 @@ body {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	cursor: default;
+	transition: filter 120ms ease;
 }
 
 .xp-task-btn:hover {
 	background: linear-gradient(to bottom, #66a8f9 0%, #4a92f3 45%, #2f74da 100%);
+	filter: brightness(1.08);
+}
+
+.xp-task-btn:active {
+	filter: brightness(0.92);
+}
+
+.xp-task-btn.active {
+	background: linear-gradient(to bottom, #1a4fb8 0%, #2159c9 45%, #2f6bdc 100%);
+	box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.xp-desktop-icon {
+	background: transparent;
+	border: 1px solid transparent;
+	transition: background-color 100ms ease, border-color 100ms ease;
+}
+
+.xp-desktop-icon:hover {
+	background: rgba(49, 106, 197, 0.45);
+	border-color: rgba(255, 255, 255, 0.35);
+}
+
+.xp-desktop-icon:active {
+	background: rgba(49, 106, 197, 0.65);
 }
 
 .xp-tray {
@@ -198,4 +243,79 @@ body {
 
 .xp-tray-clock {
 	text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.4);
+}
+
+/* sunken status strip at the bottom of a window, like Explorer */
+.xp-statusbar {
+	border-top: 1px solid #d5d2c8;
+	background: var(--xp-bg);
+	padding: 2px 6px;
+	font-size: 11px;
+	color: #444;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.xp-statusbar .xp-status-cell {
+	border: 1px solid #d5d2c8;
+	border-right-color: #7f9db9;
+	border-bottom-color: #7f9db9;
+	padding: 1px 8px;
+}
+
+/* explorer-style toolbar strip above sunken content */
+.xp-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 4px;
+	background: linear-gradient(to bottom, #fdfdfd 0%, #f2f1ea 45%, #ece9d8 90%, #f5f3ec 100%);
+	border-bottom: 1px solid #d5d2c8;
+}
+
+.xp-toolbar-btn {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	border: 1px solid transparent;
+	border-radius: 3px;
+	padding: 2px 6px;
+	font-size: 11px;
+	cursor: default;
+}
+
+.xp-toolbar-btn:hover {
+	border-color: #b6bdd2;
+	background: linear-gradient(to bottom, #fffefa 0%, #ebe9d6 100%);
+}
+
+.xp-toolbar-btn:active {
+	border-color: #7f9db9;
+	background: linear-gradient(to bottom, #dcd8c8 0%, #ece9d8 100%);
+}
+
+/* welcome-screen task links (XP "Welcome to Windows" style) */
+.xp-welcome-link {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: #0000cc;
+	text-decoration: none;
+	padding: 3px 4px;
+	border-radius: 3px;
+}
+
+.xp-welcome-link:hover {
+	text-decoration: underline;
+	background: rgba(49, 106, 197, 0.12);
+}
+
+.xp-desktop-icon .icon-label {
+	border: 1px dotted transparent;
+}
+
+.xp-desktop-icon:hover .icon-label {
+	border-color: rgba(255, 255, 255, 0.6);
+	background: rgba(49, 106, 197, 0.3);
 }

@@ -1,13 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { VideoPlayer, type Video } from "./video-player";
+import { VideoPlayer } from "./video-player";
 import {
 	SpotifyPlayer,
 	SPOTIFY_CONNECTED_EVENT,
 	SPOTIFY_AUTH_OPEN_EVENT,
 	SPOTIFY_AUTH_CLOSE_EVENT,
 } from "./spotify-player";
+import AuthWindow from "./auth-window";
+import { BootScreen } from "./boot-screen";
+import { GuestlistDesktop } from "./guestlist-desktop";
+import { useAuth } from "./lib/auth";
+import { api, type SiteConfig, type TourDate, type BlogPost, type VideoItem, type LinkItem, type Guest } from "./lib/api";
+import { CrudEditor, ConfigEditor, TabbedEditors, type FieldDef } from "./editors";
 
 type Point = { x: number; y: number };
 
@@ -15,73 +21,127 @@ type WinState = {
 	id: SectionId;
 	minimized: boolean;
 	maximized: boolean;
+	// fixed position per window: slot index in open order
+	slot: number;
+	// stored position for manually opened windows (random spot on the desktop)
+	manualPos?: Point;
 };
 
 type SectionId =
 	| "welcome"
 	| "music"
 	| "tour"
-	| "tickets"
 	| "about"
 	| "videos"
-	| "secret"
+	| "news"
+	| "guestlist"
+	| "admin"
 	| "spotifyAuth";
 
 const SECTIONS: Record<SectionId, { icon: string; title: string }> = {
 	welcome: { icon: "/icons/48/welcome.png", title: "Welcome" },
 	music: { icon: "/icons/48/music.png", title: "Music - Windows Media Player" },
 	tour: { icon: "/icons/48/tour.png", title: "Tour Dates" },
-	tickets: { icon: "/icons/48/tickets.png", title: "Buy Tickets" },
 	about: { icon: "/icons/48/readme.png", title: "README.TXT - Notepad" },
 	videos: { icon: "/icons/48/videos.png", title: "Videos - Media Player" },
-	secret: { icon: "/icons/48/guestlist.png", title: "guestlist.exe" },
+	news: { icon: "/icons/48/readme.png", title: "News - Notepad" },
+	guestlist: { icon: "/icons/48/guestlist.png", title: "Guest List" },
+	admin: { icon: "/icons/48/guestlist.png", title: "Content Manager" },
 	spotifyAuth: { icon: "/icons/48/music.png", title: "Connect Spotify - Internet Explorer" },
 };
 
-const LINKS = {
-	spotify: "https://open.spotify.com/artist/dupont",
-	unreleased: "https://soundcloud.com/dupont0k/sets/unreleased",
-	presave: "https://distrokid.com/hyperfollow/dupont/next",
-	doku: "https://dupont.doku",
-	sessions: "https://www.youtube.com/@dupontsessions",
-	articles: "https://gaaffa.dk/dupont",
-	email: "booking@dupontdoku.example",
+const TOUR_FIELDS: FieldDef[] = [
+	{ key: "eventDate", label: "Date" },
+	{ key: "city", label: "City" },
+	{ key: "venue", label: "Venue" },
+	{ key: "ticketUrl", label: "Ticket URL (per show)", optional: true },
+	{ key: "notes", label: "Notes", optional: true },
+	{ key: "sortOrder", label: "Sort", type: "number", default: 0 },
+];
+
+const BLOG_FIELDS: FieldDef[] = [
+	{ key: "title", label: "Title" },
+	{ key: "slug", label: "Slug" },
+	{ key: "body", label: "Body", type: "textarea" },
+	{ key: "published", label: "Published", type: "checkbox", default: true },
+];
+
+const VIDEO_FIELDS: FieldDef[] = [
+	{ key: "youtubeId", label: "YouTube ID" },
+	{ key: "title", label: "Title" },
+	{ key: "subtitle", label: "Subtitle", optional: true },
+	{ key: "sortOrder", label: "Sort", type: "number", default: 0 },
+];
+
+const LINK_FIELDS: FieldDef[] = [
+	{ key: "label", label: "Label" },
+	{ key: "url", label: "URL" },
+	{ key: "icon", label: "Icon path", optional: true },
+	{ key: "location", label: "Location", type: "select", options: ["start", "desktop", "window"], default: "start" },
+	{ key: "category", label: "Category", type: "select", options: ["music", "social", "press", "other"], default: "other" },
+	{ key: "sortOrder", label: "Sort", type: "number", default: 0 },
+];
+
+const CONFIG_FIELDS: FieldDef[] = [
+	{ key: "welcomeMessage", label: "Welcome message", type: "textarea" },
+	{ key: "heroText", label: "Bio (README)", type: "textarea" },
+	{ key: "contactEmail", label: "Contact email" },
+	{ key: "generalTicketUrl", label: "General ticket URL" },
+	{ key: "footerNote", label: "Footer note" },
+];
+
+const DESKTOP_WINDOW_WIDTHS: Partial<Record<SectionId, number>> = {
+	videos: 520,
+	spotifyAuth: 460,
+	tour: 460,
+	news: 380,
+	about: 360,
+	music: 420,
+	admin: 520,
+	guestlist: 380,
 };
 
-const VIDEOS: Video[] = [
-	{
-		id: "OK3GRe_lx0w",
-		title: "DUPONT - Lake Highland Sessions",
-		subtitle: "Lake Highland Sessions",
-	},
-	{
-		id: "g5xP14Fdg_E",
-		title: "Dupont : Sofasessions i 18b - 2025",
-		subtitle: "18b Nørregade",
-	},
-	{
-		id: "NWflq55NZf8",
-		title: "Dupont - Night terrors",
-		subtitle: "KarriereKanonen 2024, DR P3",
-	},
-];
+// arranged so the default open windows form a tidy cascade
+// only these open by default: welcome, links (README/about) and tour dates
+const DEFAULT_OPEN: SectionId[] = ["welcome", "tour", "about"];
 
-const DESKTOP_ICONS: { id: SectionId; label: string }[] = [
-	{ id: "about", label: "README.TXT" },
-	{ id: "music", label: "Music" },
-	{ id: "videos", label: "Videos" },
-	{ id: "tour", label: "Tour Dates" },
-	{ id: "tickets", label: "Tickets" },
-];
+// horizontal strip layout for the default windows: side by side on the same
+// height, each advanced by the previous window's width plus a gap. Position
+// derives from the open slot and is computed once — no re-flow, free dragging
+// afterwards.
+const ROW_ORIGIN = { x: 170, y: 40 };
+const ROW_GAP = 16;
 
-const START_LINKS: { icon: string; label: string; href: string }[] = [
-	{ icon: "/icons/48/music.png", label: "Spotify", href: LINKS.spotify },
-	{ icon: "/icons/48/tickets.png", label: "Pre-save the new single", href: LINKS.presave },
-	{ icon: "/icons/48/guestlist.png", label: "Unreleased music", href: LINKS.unreleased },
-	{ icon: "/icons/48/videos.png", label: "Sessions on YouTube", href: LINKS.sessions },
-	{ icon: "/icons/48/readme.png", label: "Articles", href: LINKS.articles },
-	{ icon: "/icons/48/tour.png", label: "dupont.doku", href: LINKS.doku },
-];
+function rowPosition(openIndex: number): Point {
+	// walk the desktop widths in open order to find where this slot lands
+	let x = ROW_ORIGIN.x;
+	for (let i = 0; i < openIndex; i++) {
+		x += DESKTOP_WINDOW_WIDTHS[DEFAULT_OPEN[i] ?? "about"] ?? 400;
+		x += ROW_GAP;
+	}
+	return { x, y: ROW_ORIGIN.y };
+}
+
+// random desktop spot for manually opened windows, clamped to stay on screen
+function randomPosition(): Point {
+	const maxW = typeof window !== "undefined" ? window.innerWidth : 1280;
+	const maxH = typeof window !== "undefined" ? window.innerHeight : 800;
+	const x = Math.random() * Math.max(80, maxW - 480) + 60;
+	const y = Math.random() * Math.max(60, maxH - 420) + 30;
+	return { x: Math.round(x), y: Math.round(y) };
+}
+
+function useIsMobile(): boolean {
+	const [isMobile, setIsMobile] = useState(false);
+	useEffect(() => {
+		const mq = window.matchMedia("(max-width: 767px)");
+		const update = () => setIsMobile(mq.matches);
+		update();
+		mq.addEventListener("change", update);
+		return () => mq.removeEventListener("change", update);
+	}, []);
+	return isMobile;
+}
 
 function DraggableWindow({
 	section,
@@ -92,8 +152,10 @@ function DraggableWindow({
 	onToggleMax,
 	onOpenSection,
 	onFocus,
+	focused,
 	z,
 	initial,
+	mobile = false,
 }: {
 	section: SectionId;
 	minimized: boolean;
@@ -103,8 +165,10 @@ function DraggableWindow({
 	onToggleMax: () => void;
 	onOpenSection: (id: SectionId) => void;
 	onFocus: () => void;
+	focused: boolean;
 	z: number;
 	initial?: Point;
+	mobile?: boolean;
 }) {
 	const [pos, setPos] = useState<Point>(initial ?? { x: 80, y: 60 });
 	const [offset, setOffset] = useState<Point | null>(null);
@@ -112,11 +176,14 @@ function DraggableWindow({
 
 	const onTitlePointerDown = useCallback(
 		(e: React.PointerEvent<HTMLDivElement>) => {
-			if ((e.target as HTMLElement).closest("button") || maximized) return;
+			// only start a drag from the title bar itself, not its buttons
+			if (mobile || (e.target as HTMLElement).closest("button")) return;
+			if (maximized) return;
 			e.currentTarget.setPointerCapture(e.pointerId);
 			setOffset({ x: e.clientX - pos.x, y: e.clientY - pos.y });
+			onFocus();
 		},
-		[pos, maximized],
+		[pos, maximized, mobile, onFocus],
 	);
 
 	const onTitlePointerMove = useCallback(
@@ -131,21 +198,41 @@ function DraggableWindow({
 
 	if (minimized) return null;
 
+	// mobile layout: static flex-list card — full width, no dragging, and the
+	// window controls are hidden so windows can only be switched, not closed
+	if (mobile) {
+		return (
+			<div className="xp-window relative flex w-full flex-col" onPointerDown={onFocus}>
+				<div className="xp-title cursor-default">
+					<span className="xp-title-icon mr-1">
+						{/* eslint-disable-next-line @next/next/no-img-element */}
+						<img src={meta.icon} alt="" className="h-4 w-4" />
+					</span>
+					<span className="flex-1 truncate">{meta.title}</span>
+				</div>
+				<div className="max-h-[65vh] min-h-0 overflow-auto p-3">
+					<SectionContent section={section} onOpenSection={onOpenSection} />
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div
 			className="absolute flex flex-col"
 			style={{
 				left: maximized ? 0 : pos.x,
 				top: maximized ? 0 : pos.y,
-				width: maximized ? "100%" : section === "videos" ? 520 : section === "spotifyAuth" ? 460 : 400,
-				height: maximized ? "calc(100% - 32px)" : undefined,
+				width: maximized ? "100%" : (DESKTOP_WINDOW_WIDTHS[section] ?? 400),
+				height: maximized ? "calc(100% - 32px)" : "auto",
+				maxHeight: maximized ? undefined : "calc(100% - 48px)",
 				zIndex: z,
 			}}
 			onPointerDown={onFocus}
 		>
-			<div className="xp-window flex h-full flex-col">
+			<div className={`xp-window flex h-full flex-col ${focused ? "focused" : ""}`}>
 				<div
-					className="xp-title"
+					className={`xp-title ${focused ? "" : "inactive"}`}
 					onPointerDown={onTitlePointerDown}
 					onPointerMove={onTitlePointerMove}
 					onPointerUp={endDrag}
@@ -157,13 +244,13 @@ function DraggableWindow({
 						<img src={meta.icon} alt="" className="h-4 w-4" />
 					</span>
 					<span className="flex-1 truncate">{meta.title}</span>
-					<button className="xp-title-btn min" aria-label="Minimize" onClick={onMinimize}>
-						<span className="-mt-1">_</span>
-					</button>
-					<button className="xp-title-btn max" aria-label="Maximize" onClick={onToggleMax}>
-						<span className="text-[10px]">▢</span>
-					</button>
-					<button className="xp-title-btn close ml-1" aria-label="Close" onClick={onClose}>
+						<button className="xp-title-btn min" aria-label="Minimize" onPointerDown={(e) => { e.preventDefault(); onMinimize(); }}>
+							<span className="-mt-1">_</span>
+						</button>
+						<button className="xp-title-btn max" aria-label="Maximize" onPointerDown={(e) => { e.preventDefault(); onToggleMax(); }}>
+							<span className="text-[10px]">▢</span>
+						</button>
+						<button className="xp-title-btn close ml-1" aria-label="Close" onPointerDown={(e) => { e.preventDefault(); onClose(); }}>
 						<span className="text-[14px]">✕</span>
 					</button>
 				</div>
@@ -175,142 +262,339 @@ function DraggableWindow({
 	);
 }
 
-const SOLUTION = [
-	[1, 2, 3, 4],
-	[3, 4, 1, 2],
-	[2, 1, 4, 3],
-	[4, 3, 2, 1],
-];
+function TourWindow({ config }: { config: SiteConfig | null }) {
+	const [dates, setDates] = useState<TourDate[] | null>(null);
+	const [error, setError] = useState("");
 
-const PUZZLE = [
-	[1, 0, 0, 4],
-	[0, 0, 1, 0],
-	[0, 1, 0, 0],
-	[4, 0, 0, 1],
-];
+	useEffect(() => {
+		api.getTourDates()
+			.then((list) => setDates([...list].sort((a, b) => a.sortOrder - b.sortOrder)))
+			.catch((err) => setError(err instanceof Error ? err.message : "Failed to load tour dates"));
+	}, []);
 
-function GuestlistGame({ onOpenSection }: { onOpenSection: (id: SectionId) => void }) {
-	const [grid, setGrid] = useState(() => PUZZLE.map((row) => [...row]));
-	const [entered, setEntered] = useState(false);
-	const solved = grid.every((row, r) => row.every((v, c) => v === SOLUTION[r][c]));
+	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
+	if (!dates) return <p className="text-[12px]">Loading…</p>;
+	if (dates.length === 0) return <p className="text-[12px] opacity-70">No dates announced yet — check back soon.</p>;
 
-	const cycle = (r: number, c: number) => {
-		if (PUZZLE[r][c] !== 0) return;
-		setGrid((prev) => {
-			const next = prev.map((row) => [...row]);
-			next[r][c] = (next[r][c] + 1) % 5;
-			return next;
-		});
-	};
-
-	if (entered) {
-		return (
-			<div className="xp-inset rounded-sm p-3 text-[11px]">
-				<p className="font-bold">You&apos;re on the list!</p>
-				<p className="mt-1">
-					Show this code at the door for a free guestlist spot (+1):
-				</p>
-				<p className="my-2 rounded-sm border border-[#7f9db9] bg-white py-2 text-center font-mono text-base tracking-[0.3em]">
-					DUPONT-4EVER
-				</p>
-				<p className="opacity-70">
-					While you wait: <a className="text-[#0000cc] underline" href={LINKS.presave} target="_blank" rel="noopener noreferrer">pre-save the new single</a>.
-				</p>
+	return (
+		<div className="flex h-full flex-col">
+			<div className="xp-toolbar -mx-3 -mt-3 mb-2">
+				<span className="xp-toolbar-btn font-bold">📅 Tour Dates</span>
+				<span className="ml-auto pr-1 text-[10px] opacity-60">Dupont — Denmark</span>
 			</div>
-		);
-	}
+			<div className="xp-inset min-h-0 flex-1 overflow-auto rounded-sm">
+				<table className="w-full border-collapse text-left">
+					<thead>
+						<tr>
+							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">Date</th>
+							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">City</th>
+							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">Venue</th>
+						</tr>
+					</thead>
+					<tbody>
+						{dates.map((d) => (
+							<tr key={d.id} className="hover:bg-[#cde5ff]">
+								<td className="px-2 py-1">{d.eventDate}</td>
+								<td className="px-2 py-1">{d.city}</td>
+								<td className="px-2 py-1">
+									{d.venue}
+									{d.notes ? <span className="ml-1 opacity-60">{d.notes}</span> : null}
+									{d.ticketUrl && (
+										<a
+											className="ml-2 text-[11px] text-[#0000cc] underline"
+											href={d.ticketUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+										>
+											Tickets →
+										</a>
+									)}
+								</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</div>
+			<div className="xp-statusbar mt-2">
+				<span className="xp-status-cell">{dates.length} dates found</span>
+				{config?.generalTicketUrl && (
+					<a
+						className="xp-btn ml-auto px-3 py-0.5 no-underline"
+						href={config.generalTicketUrl}
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						Get Tickets →
+					</a>
+				)}
+			</div>
+			{config?.contactEmail && (
+				<a className="mt-1.5 text-right text-[10px] text-[#0000cc] underline" href={`mailto:${config.contactEmail}`}>
+					Questions? {config.contactEmail}
+				</a>
+			)}
+		</div>
+	);
+}
 
-	if (!solved) {
-		return (
-			<div>
-				<p className="mb-2 text-[11px]">
-					Solve the dupontdoku to unlock the guestlist. Click a cell to cycle 1-4. Each
-					row, column and 2×2 box needs 1-4 exactly once.
-				</p>
-				<div className="xp-inset inline-grid grid-cols-4 gap-0 rounded-sm bg-white p-1">
-					{grid.map((row, r) =>
-						row.map((v, c) => (
-							<button
-								key={`${r}-${c}`}
-								onClick={() => cycle(r, c)}
-								className={`flex h-11 w-11 items-center justify-center font-mono text-base ${
-									PUZZLE[r][c] !== 0
-										? "cursor-default text-[#316ac5]"
-										: "hover:bg-[#cde5ff]"
-									} ${c === 1 ? "border-r-2 border-r-[#7f9db9]" : ""} ${
-									r === 1 ? "border-b-2 border-b-[#7f9db9]" : ""
-								}`}
-							>
-								{v !== 0 ? v : ""}
-							</button>
-						)),
-					)}
+function NewsWindow() {
+	const [posts, setPosts] = useState<BlogPost[] | null>(null);
+	const [error, setError] = useState("");
+
+	useEffect(() => {
+		api.getBlogPosts()
+			.then((list) => setPosts(list.filter((p) => p.published)))
+			.catch((err) => setError(err instanceof Error ? err.message : "Failed to load news"));
+	}, []);
+
+	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
+	if (!posts) return <p className="text-[12px]">Loading…</p>;
+	if (posts.length === 0) return <p className="text-[12px] opacity-70">No news yet.</p>;
+
+	return (
+		<div className="flex h-full flex-col">
+			<div className="xp-toolbar -mx-3 -mt-3 mb-2">
+				<span className="xp-toolbar-btn font-bold">📰 News</span>
+				<span className="ml-auto pr-1 text-[10px] opacity-60">{posts.length} posts</span>
+			</div>
+			<div className="xp-inset min-h-0 flex-1 overflow-auto rounded-sm p-2">
+				<div className="flex flex-col gap-3 font-mono text-[11px]">
+					{posts.map((p) => (
+						<article key={p.id}>
+							<h3 className="font-bold">{p.title}</h3>
+							<div className="whitespace-pre-wrap">{p.body}</div>
+						</article>
+					))}
 				</div>
+			</div>
+			<div className="xp-statusbar mt-2">
+				<span className="xp-status-cell">Press & announcements</span>
+			</div>
+		</div>
+	);
+}
+
+function VideosWindow() {
+	const [videos, setVideos] = useState<VideoItem[] | null>(null);
+	const [error, setError] = useState("");
+
+	useEffect(() => {
+		api.getVideos()
+			.then((list) => setVideos([...list].sort((a, b) => a.sortOrder - b.sortOrder)))
+			.catch((err) => setError(err instanceof Error ? err.message : "Failed to load videos"));
+	}, []);
+
+	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
+	if (!videos) return <p className="text-[12px]">Loading…</p>;
+	if (videos.length === 0) return <p className="text-[12px] opacity-70">No videos yet.</p>;
+
+	return (
+		<VideoPlayer
+			videos={videos.map((v) => ({ id: v.youtubeId, title: v.title, subtitle: v.subtitle }))}
+		/>
+	);
+}
+
+function AboutWindow({ config }: { config: SiteConfig | null }) {
+	const [links, setLinks] = useState<LinkItem[]>([]);
+
+	useEffect(() => {
+		api.getLinks()
+			.then((list) => setLinks(list.filter((l) => l.location === "window")))
+			.catch(() => setLinks([]));
+	}, []);
+
+	return (
+		<div className="flex h-full flex-col">
+			<div className="min-h-48 flex-1 overflow-auto bg-white p-2 font-mono text-[11px] whitespace-pre-wrap">
+				{[
+					"README.TXT",
+					"",
+					config?.heroText || "",
+					"",
+					`Contact: ${config?.contactEmail || "—"}`,
+				]
+					.join("\n")
+					.trim()}
+			</div>
+			{links.length > 0 && (
+				<div className="mt-2 flex flex-wrap gap-1">
+					{links.map((l) => (
+						<a
+							key={l.id}
+							className="xp-btn text-center no-underline"
+							href={l.url}
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							{l.icon && (
+								// eslint-disable-next-line @next/next/no-img-element
+								<img src={l.icon} alt="" className="mr-1 inline h-3.5 w-3.5" />
+							)}
+							{l.label}
+						</a>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function formatDuration(ms: number): string {
+	const totalSec = Math.max(0, Math.floor(ms / 1000));
+	const h = Math.floor(totalSec / 3600);
+	const m = Math.floor((totalSec % 3600) / 60);
+	const s = totalSec % 60;
+	return h > 0
+		? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+		: `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function GuestlistWindow() {
+	const [guests, setGuests] = useState<Guest[] | null>(null);
+	const [error, setError] = useState("");
+	const [me, setMe] = useState<{ name: string; durationMs: number } | null>(null);
+
+	useEffect(() => {
+		api.gameGuests()
+			.then((list) => setGuests([...list].sort((a, b) => a.durationMs - b.durationMs)))
+			.catch((err) => setError(err instanceof Error ? err.message : "Failed to load the guest list"));
+		api.gameMe()
+			.then((res) => setMe(res.guest))
+			.catch(() => setMe(null));
+	}, []);
+
+	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
+	if (!guests) return <p className="text-[12px]">Loading…</p>;
+
+	return (
+		<div className="flex h-full flex-col text-[12px]">
+			{me && (
+				<div className="mb-2 rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
+					You&apos;re on the list, <span className="font-bold">{me.name}</span> — time {formatDuration(me.durationMs)}.
+				</div>
+			)}
+			<p className="mb-1 text-[11px] opacity-70">
+				Everyone who has beaten the hidden challenge. Fastest at the top.
+			</p>
+			<div className="xp-inset min-h-0 flex-1 overflow-auto rounded-sm bg-white">
+				{guests.length === 0 ? (
+					<p className="p-2 opacity-60">The list is empty — nobody has made it yet.</p>
+				) : (
+					<table className="w-full border-collapse text-left">
+						<thead>
+							<tr>
+								<th className="border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 font-normal">#</th>
+								<th className="border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 font-normal">Name</th>
+								<th className="border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 font-normal">Time</th>
+								<th className="border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 font-normal">Added</th>
+							</tr>
+						</thead>
+						<tbody>
+							{guests.map((g, i) => {
+								const isMe = me?.name === g.name && me.durationMs === g.durationMs;
+								return (
+									<tr key={g.id} className="hover:bg-[#cde5ff]">
+										<td className="px-2 py-1 opacity-60">{i + 1}</td>
+										<td className="px-2 py-1">
+											{g.name}
+											{isMe && <span className="ml-1 text-[10px] font-bold text-[#316ac5]">(you)</span>}
+										</td>
+										<td className="px-2 py-1 tabular-nums">{formatDuration(g.durationMs)}</td>
+										<td className="px-2 py-1 opacity-60">
+											{new Date(g.createdAt).toLocaleDateString([], { day: "numeric", month: "short" })}
+										</td>
+									</tr>
+								);
+							})}
+						</tbody>
+					</table>
+				)}
+			</div>
+		</div>
+	);
+}
+
+function AdminWindow() {
+	const { user, loading } = useAuth();
+
+	if (loading) return <p className="text-[12px]">Loading…</p>;
+	if (!user) {
+		return (
+			<div className="flex h-full flex-col">
+				<p className="mb-2 text-[12px]">Log in to edit site content.</p>
+				<AuthWindow />
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex flex-col gap-3">
-			<p className="text-[12px] font-bold">🎉 You solved it — welcome to the hidden gem.</p>
-			<form
-				className="flex flex-col gap-2"
-				onSubmit={(e) => {
-					e.preventDefault();
-					setEntered(true);
-				}}
-			>
-				<input required placeholder="Your name" className="xp-inset rounded-sm px-1 py-0.5 text-[12px]" />
-				<input
-					required
-					type="email"
-					placeholder="Your email"
-					className="xp-inset rounded-sm px-1 py-0.5 text-[12px]"
-				/>
-				<select className="xp-inset rounded-sm px-1 py-0.5 text-[12px]">
-					<option>Copenhagen - Vega</option>
-					<option>Berlin - Lido</option>
-					<option>Amsterdam - Paradiso</option>
-					<option>London - KOKO</option>
-				</select>
-				<button type="submit" className="xp-btn px-4">
-					Claim free guestlist ticket
-				</button>
-			</form>
-			<div className="xp-inset rounded-sm p-2">
-				<p className="mb-1 text-[11px] font-bold">What&apos;s new</p>
-				<p className="text-[11px]">
-					New single drops Friday. Unreleased demos are rotating on SoundCloud this week
-					only.
-				</p>
-			</div>
-			<div className="grid grid-cols-2 gap-1 text-[11px]">
-								<button className="xp-btn" onClick={() => onOpenSection("tour")}>
-					<img src="/icons/16/tour.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Tour dates
-					</button>
-					<a className="xp-btn text-center" href={LINKS.spotify} target="_blank" rel="noopener noreferrer">
-						<img src="/icons/16/music.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Spotify
-					</a>
-					<a className="xp-btn text-center" href={LINKS.unreleased} target="_blank" rel="noopener noreferrer">
-						<img src="/icons/16/guestlist.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Unreleased music
-					</a>
-					<a className="xp-btn text-center" href={LINKS.presave} target="_blank" rel="noopener noreferrer">
-						<img src="/icons/16/tickets.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Pre-save
-					</a>
-					<a className="xp-btn text-center" href={LINKS.sessions} target="_blank" rel="noopener noreferrer">
-						<img src="/icons/16/videos.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Sessions (YouTube)
-					</a>
-					<a className="xp-btn text-center" href={LINKS.doku} target="_blank" rel="noopener noreferrer">
-						<img src="/icons/16/readme.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> dupont.doku
-					</a>
-					<a className="xp-btn text-center" href={LINKS.articles} target="_blank" rel="noopener noreferrer">
-						<img src="/icons/16/tour.png" alt="" className="mr-1 inline h-3.5 w-3.5" /> Articles
-					</a>
-			</div>
-			<a className="text-[11px] text-[#0000cc] underline" href={`mailto:${LINKS.email}`}>
-				Get in touch: {LINKS.email}
-			</a>
-		</div>
+		<TabbedEditors
+			tabs={[
+				{
+					label: "Settings",
+					content: (
+						<ConfigEditor
+							fields={CONFIG_FIELDS}
+							fetchConfig={() => api.getConfig()}
+							saveConfig={(patch) => api.patchConfig(patch)}
+						/>
+					),
+				},
+				{
+					label: "Tour dates",
+					content: (
+						<CrudEditor
+							title="Tour dates"
+							fields={TOUR_FIELDS}
+							fetchItems={() => api.getTourDates()}
+							createItem={(data) => api.tourDates.create(data)}
+							updateItem={(id, data) => api.tourDates.update(id, data)}
+							deleteItem={(id) => api.tourDates.remove(id)}
+						/>
+					),
+				},
+				{
+					label: "News",
+					content: (
+						<CrudEditor
+							title="Blog posts"
+							fields={BLOG_FIELDS}
+							fetchItems={() => api.getBlogPosts()}
+							createItem={(data) => api.blogPosts.create(data)}
+							updateItem={(id, data) => api.blogPosts.update(id, data)}
+							deleteItem={(id) => api.blogPosts.remove(id)}
+						/>
+					),
+				},
+				{
+					label: "Videos",
+					content: (
+						<CrudEditor
+							title="Videos"
+							fields={VIDEO_FIELDS}
+							fetchItems={() => api.getVideos()}
+							createItem={(data) => api.videos.create(data)}
+							updateItem={(id, data) => api.videos.update(id, data)}
+							deleteItem={(id) => api.videos.remove(id)}
+						/>
+					),
+				},
+				{
+					label: "Links",
+					content: (
+						<CrudEditor
+							title="Links"
+							fields={LINK_FIELDS}
+							fetchItems={() => api.getLinks()}
+							createItem={(data) => api.links.create(data)}
+							updateItem={(id, data) => api.links.update(id, data)}
+							deleteItem={(id) => api.links.remove(id)}
+						/>
+					),
+				},
+			]}
+		/>
 	);
 }
 
@@ -377,6 +661,7 @@ function SpotifyAuthFrame() {
 				</button>
 			</div>
 			<div className="flex flex-1 flex-col items-center justify-center gap-3 bg-white p-4 text-center">
+				{/* eslint-disable-next-line @next/next/no-img-element */}
 				<img src="/icons/48/music.png" alt="" className="h-12 w-12" />
 				<div className="text-[13px] font-bold">Connect your Spotify account</div>
 				<p className="max-w-64 text-[11px] leading-snug opacity-70">
@@ -390,6 +675,7 @@ function SpotifyAuthFrame() {
 		</div>
 	);
 }
+
 function SectionContent({
 	section,
 	onOpenSection,
@@ -397,125 +683,112 @@ function SectionContent({
 	section: SectionId;
 	onOpenSection: (id: SectionId) => void;
 }) {
+	const [config, setConfig] = useState<SiteConfig | null>(null);
+
+	useEffect(() => {
+		api.getConfig()
+			.then(setConfig)
+			.catch(() => setConfig(null));
+	}, []);
+
 	switch (section) {
 		case "music":
 			return <SpotifyPlayer />;
 		case "tour":
-			return (
-				<div>
-					<table className="w-full border-collapse text-left">
-					<thead>
-						<tr>
-							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">Date</th>
-							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">City</th>
-							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">Venue</th>
-						</tr>
-					</thead>
-					<tbody>
-						{[
-							["Oct 03", "Copenhagen", "Vega"],
-							["Oct 11", "Berlin", "Lido"],
-							["Oct 18", "Amsterdam", "Paradiso"],
-							["Nov 01", "London", "KOKO"],
-						].map(([date, city, venue]) => (
-							<tr key={date} className="hover:bg-[#cde5ff]">
-								<td className="px-2 py-1">{date}</td>
-								<td className="px-2 py-1">{city}</td>
-								<td className="px-2 py-1">{venue}</td>
-							</tr>
-						))}
-					</tbody>
-					</table>
-					<div className="mt-3 flex items-center justify-between rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
-						<span>4 dates found</span>
-						<button className="xp-btn px-3 py-0.5">Get Tickets →</button>
-					</div>
-				</div>
-			);
-		case "tickets":
-			return (
-				<form
-					className="flex flex-col gap-2"
-					onSubmit={(e) => e.preventDefault()}
-				>
-					<label className="flex items-center justify-between gap-2">
-						Show:
-						<select className="xp-inset w-48 rounded-sm px-1 py-0.5">
-							<option>Copenhagen - Vega</option>
-							<option>Berlin - Lido</option>
-							<option>Amsterdam - Paradiso</option>
-							<option>London - KOKO</option>
-						</select>
-					</label>
-					<label className="flex items-center justify-between gap-2">
-						Qty:
-						<input
-							type="number"
-							min={1}
-							defaultValue={2}
-							className="xp-inset w-16 rounded-sm px-1 py-0.5"
-						/>
-					</label>
-				<div className="mt-1 flex justify-end gap-2">
-						<button type="reset" className="xp-btn px-4">
-							Cancel
-						</button>
-						<button type="submit" className="xp-btn px-4">
-							Buy Tickets
-						</button>
-					</div>
-				</form>
-			);
-		case "secret":
-			return <GuestlistGame onOpenSection={onOpenSection} />;
+			return <TourWindow config={config} />;
+		case "news":
+			return <NewsWindow />;
+		case "videos":
+			return <VideosWindow />;
+		case "about":
+			return <AboutWindow config={config} />;
+		case "guestlist":
+			return <GuestlistWindow />;
+		case "admin":
+			return <AdminWindow />;
 		case "spotifyAuth":
 			return <SpotifyAuthFrame />;
-		case "videos":
-			return <VideoPlayer videos={VIDEOS} />;
-		case "about":
-			return (
-				<div className="flex h-full flex-col">
-					<div className="min-h-48 flex-1 overflow-auto bg-white p-2 font-mono text-[11px] whitespace-pre-wrap">
-						{`DUPONTDOKU - README.TXT
-
-Genre: lo-fi synth / bedroom pop
-Formed: 2019, Aarhus DK
-
-psst... type the name of this site anywhere on the page.
-
-Contact: booking@dupontdoku.example
-`}
-					</div>
-				</div>
-			);
 		default:
-			return (
-				<div>
-					<div className="flex gap-3">
-						<div className="text-3xl leading-none">
-							<img src="/icons/16/welcome.png" alt="" className="inline h-9 w-9" />
-						</div>
-						<p className="flex-1">
-						Welcome to Dupontdoku XP. Click the icons on the desktop to explore music,
-						tour dates, tickets and more.
-					</p>
-				</div>
-				<div className="xp-inset mt-3 rounded-sm p-2 font-mono text-[11px]">
-					C:\&gt; echo hello, world_
-				</div>
-				<p className="mt-2 text-[10px] opacity-50">there is a hidden gem on this desktop…</p>
-				<div className="mt-3 flex justify-end">
-					<button className="xp-btn px-4">OK</button>
-					</div>
-				</div>
-			);
+			return <WelcomeWindow config={config} onOpenSection={onOpenSection} />;
 	}
 }
 
+// XP "Welcome to Windows"-style landing: blue banner, bio, big task links
+function WelcomeWindow({
+	config,
+	onOpenSection,
+}: {
+	config: SiteConfig | null;
+	onOpenSection: (id: SectionId) => void;
+}) {
+	const [links, setLinks] = useState<LinkItem[]>([]);
+
+	useEffect(() => {
+		api.getLinks()
+			.then((list) => setLinks(list.filter((l) => l.location === "window" && l.category === "social")))
+			.catch(() => setLinks([]));
+	}, []);
+
+	return (
+		<div className="flex h-full flex-col">
+			<div className="rounded-sm bg-linear-to-r from-[#0058e6] via-[#3f8cf3] to-[#0058e6] p-3 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
+				<div className="flex items-center gap-2">
+					{/* eslint-disable-next-line @next/next/no-img-element */}
+					<img src="/icons/48/welcome.png" alt="" className="h-9 w-9 drop-shadow" />
+					<div className="text-lg font-bold italic" style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.6)" }}>
+						Dupont
+					</div>
+					<div className="ml-auto text-[10px] opacity-80">Denmark</div>
+				</div>
+			</div>
+			<div className="xp-inset mt-2 flex-1 overflow-auto rounded-sm p-2 text-[11px] leading-snug">
+				{config?.welcomeMessage || "Welcome."}
+			</div>
+			<div className="mt-2 border-t border-[#d5d2c8] pt-2">
+				<div className="mb-1 text-[10px] font-bold uppercase opacity-50">Explore</div>
+				<div className="flex flex-col">
+					<button className="xp-welcome-link text-left text-[12px]" onClick={() => onOpenSection("music")}>
+						<span className="w-4 text-center">▸</span> Play the music
+					</button>
+					<button className="xp-welcome-link text-left text-[12px]" onClick={() => onOpenSection("tour")}>
+						<span className="w-4 text-center">▸</span> See tour dates
+					</button>
+					<button className="xp-welcome-link text-left text-[12px]" onClick={() => onOpenSection("videos")}>
+						<span className="w-4 text-center">▸</span> Watch the videos
+					</button>
+					<button className="xp-welcome-link text-left text-[12px]" onClick={() => onOpenSection("news")}>
+						<span className="w-4 text-center">▸</span> Read the news
+					</button>
+				</div>
+				{links.length > 0 && (
+					<div className="mt-2 flex flex-wrap gap-1 border-t border-[#d5d2c8] pt-2">
+						{links.map((l) => (
+							<a key={l.id} className="xp-btn text-[10px] no-underline" href={l.url} target="_blank" rel="noopener noreferrer">
+								{l.label}
+							</a>
+						))}
+					</div>
+				)}
+			</div>
+			{config?.footerNote && <div className="xp-statusbar mt-2 -mx-3 -mb-3">{config.footerNote}</div>}
+		</div>
+	);
+}
+
 export default function Home() {
+	const isMobile = useIsMobile();
 	const [startOpen, setStartOpen] = useState(false);
-	const [wins, setWins] = useState<WinState[]>([{ id: "welcome", minimized: false, maximized: false }]);
+	const [powerState, setPowerState] = useState<"on" | "booting" | "guestlist">("on");
+	const [bootCode, setBootCode] = useState<string | null>(null);
+	// taskbar/stack order: append-only, ordered by time opened
+	const [wins, setWins] = useState<WinState[]>(
+		DEFAULT_OPEN.map((id, slot) => ({ id, minimized: false, maximized: false, slot })),
+	);
+	// paint order, separate from the taskbar stack
+	const [zOrder, setZOrder] = useState<SectionId[]>([...DEFAULT_OPEN]);
+	const nextSlotRef = useRef(DEFAULT_OPEN.length);
 	const [clock, setClock] = useState("");
+	const [startLinks, setStartLinks] = useState<LinkItem[]>([]);
 
 	useEffect(() => {
 		const tick = () =>
@@ -526,29 +799,40 @@ export default function Home() {
 	}, []);
 
 	useEffect(() => {
-		let buf = "";
-		const onKey = (e: KeyboardEvent) => {
-			const tag = (e.target as HTMLElement | null)?.tagName;
-			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-			buf = (buf + e.key.toLowerCase()).slice(-6);
-			if (buf === "dupont") {
-				setWins((prev) =>
-					prev.some((w) => w.id === "secret")
-						? prev.map((w) => (w.id === "secret" ? { ...w, minimized: false } : w))
-						: [...prev, { id: "secret", minimized: false, maximized: false }],
-				);
-			}
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
+		api.getLinks()
+			.then((list) => setStartLinks(list.filter((l) => l.location === "start")))
+			.catch(() => setStartLinks([]));
+	}, []);
+
+	// a winner's browser carries a signed guest cookie — any refresh lands
+	// straight on the guestlist desktop
+	useEffect(() => {
+		fetch("/api/game/me", { credentials: "include" })
+			.then((r) => r.json())
+			.then((data: { guest: { name: string } | null }) => {
+				if (data.guest) setPowerState("guestlist");
+			})
+			.catch(() => {});
 	}, []);
 
 	const openSection = (id: SectionId) => {
 		setWins((prev) =>
 			prev.some((w) => w.id === id)
 				? prev.map((w) => (w.id === id ? { ...w, minimized: false } : w))
-				: [...prev, { id, minimized: false, maximized: false }],
+				: [
+						...prev,
+						{
+							id,
+							minimized: false,
+							maximized: false,
+							slot: nextSlotRef.current++,
+							// only windows opened after load get a random spot;
+							// defaults keep their row slot
+							manualPos: randomPosition(),
+						},
+					],
 		);
+		bringToFront(id);
 		setStartOpen(false);
 	};
 
@@ -567,12 +851,22 @@ export default function Home() {
 		};
 	}, []);
 
-	const focusSection = (id: SectionId) => {
-		setWins((prev) =>
-			prev[prev.length - 1]?.id === id
-				? prev
-				: [...prev.filter((w) => w.id !== id), prev.find((w) => w.id === id)!],
-		);
+	const bringToFront = useCallback((id: SectionId) => {
+		setZOrder((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((w) => w !== id), id]));
+	}, []);
+
+	// taskbar keeps its open-order; clicking a non-minimized taskbar button
+	// minimizes it, anything else focuses (and un-minimizes) it
+	const taskbarClick = (id: SectionId, minimized: boolean) => {
+		if (minimized) {
+			openSection(id);
+			return;
+		}
+		if (zOrder[zOrder.length - 1] === id) {
+			setWins((prev) => prev.map((w) => (w.id === id ? { ...w, minimized: true } : w)));
+		} else {
+			bringToFront(id);
+		}
 	};
 
 	const minimizeSection = (id: SectionId) => {
@@ -585,47 +879,80 @@ export default function Home() {
 
 	const closeSection = (id: SectionId) => {
 		setWins((prev) => prev.filter((w) => w.id !== id));
+		setZOrder((prev) => prev.filter((w) => w !== id));
 	};
+
+	const desktopLinks = startLinks.filter((l) => l.location === "desktop");
+
+	if (powerState === "booting") {
+		return (
+			<BootScreen
+				onComplete={(code) => {
+					setBootCode(code);
+					setPowerState("guestlist");
+				}}
+			/>
+		);
+	}
+
+	if (powerState === "guestlist") {
+		return <GuestlistDesktop code={bootCode ?? ""} />;
+	}
 
 	return (
 		<div className="relative h-full w-full overflow-hidden">
 			<div className="absolute top-2 left-2 flex flex-col gap-1">
-				{DESKTOP_ICONS.map(({ id, label }) => (
-					<button
-						key={id}
-						className="flex w-20 flex-col items-center gap-1 rounded p-2 text-center hover:bg-[#316ac5]/40 focus:bg-[#316ac5]/60 focus:outline-none"
-						onDoubleClick={() => openSection(id)}
-					>
-						<img
-							src={SECTIONS[id].icon}
-							alt=""
-							className="h-9 w-9 drop-shadow-[1px_1px_2px_rgba(0,0,0,0.6)]"
-						/>
-						<span
-							className="rounded px-1 text-[11px] leading-tight text-white"
-							style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.9)" }}
-						>
-							{label}
-						</span>
-					</button>
+				<DesktopIcon icon="/icons/48/readme.png" label="README.TXT" onOpen={() => openSection("about")} />
+				<DesktopIcon icon="/icons/48/music.png" label="Music" onOpen={() => openSection("music")} />
+				<DesktopIcon icon="/icons/48/videos.png" label="Videos" onOpen={() => openSection("videos")} />
+				<DesktopIcon icon="/icons/48/tour.png" label="Tour Dates" onOpen={() => openSection("tour")} />
+				<DesktopIcon icon="/icons/48/guestlist.png" label="Guest List" onOpen={() => openSection("guestlist")} />
+				<DesktopIcon icon="/icons/48/readme.png" label="News" onOpen={() => openSection("news")} />
+				{desktopLinks.map((l) => (
+					<DesktopIcon key={l.id} icon={l.icon || "/icons/48/readme.png"} label={l.label} href={l.url} />
 				))}
 			</div>
 
-			{wins.map((w, i) => (
-				<DraggableWindow
-					key={w.id}
-					section={w.id}
-					minimized={w.minimized}
-					maximized={w.maximized}
-					initial={{ x: 140 + i * 28, y: 40 + i * 28 }}
-					z={i + 1}
-					onClose={() => closeSection(w.id)}
-					onMinimize={() => minimizeSection(w.id)}
-					onToggleMax={() => toggleMaxSection(w.id)}
-					onOpenSection={openSection}
-					onFocus={() => focusSection(w.id)}
-				/>
-			))}
+			{isMobile ? (
+				// small screens: windows become a non-draggable flex list
+				<div className="absolute inset-x-0 bottom-8 top-0 flex flex-col gap-2 overflow-y-auto p-2">
+					{wins.filter((w) => !w.minimized).map((w) => (
+						<DraggableWindow
+							key={w.id}
+							section={w.id}
+							minimized={false}
+							maximized={false}
+							mobile
+							z={0}
+							focused={false}
+							onClose={() => closeSection(w.id)}
+							onMinimize={() => minimizeSection(w.id)}
+							onToggleMax={() => toggleMaxSection(w.id)}
+							onOpenSection={openSection}
+							onFocus={() => bringToFront(w.id)}
+						/>
+					))}
+				</div>
+			) : (
+				// desktop: defaults strip left-to-right; windows opened manually
+				// land on a random stored spot; dragging is free from the start
+				wins.filter((w) => !w.minimized).map((w) => (
+					<DraggableWindow
+						key={w.id}
+						section={w.id}
+						minimized={false}
+						maximized={w.maximized}
+						initial={w.manualPos ?? rowPosition(w.slot)}
+						z={zOrder.indexOf(w.id) + 1}
+						focused={zOrder[zOrder.length - 1] === w.id}
+						onClose={() => closeSection(w.id)}
+						onMinimize={() => minimizeSection(w.id)}
+						onToggleMax={() => toggleMaxSection(w.id)}
+						onOpenSection={openSection}
+						onFocus={() => bringToFront(w.id)}
+					/>
+				))
+			)}
 
 			<div className="absolute bottom-0 left-0 right-0">
 				<div className="xp-taskbar flex items-center gap-1.5 pr-1">
@@ -633,23 +960,22 @@ export default function Home() {
 						<span>🪟</span> start
 					</button>
 					<div className="flex flex-1 items-center gap-1">
-						{wins.map((w) => (
-							<button
-								key={w.id}
-								className={`xp-task-btn ${w.minimized ? "opacity-70" : ""}`}
-								onClick={() =>
-									w.minimized
-										? openSection(w.id)
-										: wins[wins.length - 1]?.id === w.id
-											? minimizeSection(w.id)
-											: focusSection(w.id)
-								}
-							>
-								<img src={SECTIONS[w.id].icon} alt="" className="mr-1 inline h-3.5 w-3.5" />
-						{SECTIONS[w.id].title.split(" - ")[0]}
-							</button>
-						))}
+						{wins.map((w) => {
+							const isActive = !w.minimized && zOrder[zOrder.length - 1] === w.id;
+							return (
+								<button
+									key={w.id}
+									className={`xp-task-btn ${isActive ? "active" : ""} ${w.minimized ? "opacity-70" : ""}`}
+									onClick={() => taskbarClick(w.id, w.minimized)}
+								>
+									{/* eslint-disable-next-line @next/next/no-img-element */}
+									<img src={SECTIONS[w.id].icon} alt="" className="mr-1 inline h-3.5 w-3.5" />
+									{SECTIONS[w.id].title.split(" - ")[0]}
+								</button>
+							);
+						})}
 					</div>
+					<TaskbarAuth onOpenAdmin={() => openSection("admin")} />
 					<div className="xp-tray flex h-full items-center gap-2 text-[11px]">
 						<span title="Volume">🔊</span>
 						<span title="Network">📶</span>
@@ -674,36 +1000,56 @@ export default function Home() {
 								className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-bold hover:bg-[#316ac5] hover:text-white"
 								onClick={() => openSection("welcome")}
 							>
+								{/* eslint-disable-next-line @next/next/no-img-element */}
 								<img src="/icons/16/welcome.png" alt="" className="h-5 w-5" /> Welcome
 							</button>
 							<button
 								className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
-								onClick={() => openSection("secret")}
+								onClick={() => openSection("admin")}
 							>
-								<img src="/icons/16/guestlist.png" alt="" className="h-5 w-5" /> guestlist.exe
+								{/* eslint-disable-next-line @next/next/no-img-element */}
+								<img src="/icons/16/guestlist.png" alt="" className="h-5 w-5" /> Content Manager
 							</button>
 						</div>
 						<div className="mx-1 border-t border-[#d5d2c8]" />
 						<div className="p-1">
-							{START_LINKS.map(({ icon, label, href }) => (
-								<a
-									key={label}
-									className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
-									href={href}
-									target="_blank"
-									rel="noopener noreferrer"
-								>
-									<img src={icon} alt="" className="h-5 w-5" />
-									{label} <span className="ml-auto opacity-60">↗</span>
-								</a>
-							))}
-							<a
-								className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
-								href={`mailto:${LINKS.email}`}
-							>
-								<span className="flex h-5 w-5 items-center justify-center text-[13px]">✉️</span> Get
-						in touch
-							</a>
+							{(() => {
+								// group the start links by category with headings
+								const groups: Record<string, LinkItem[]> = {};
+								for (const l of startLinks) {
+									(groups[l.category] ??= []).push(l);
+								}
+								const headings: Record<string, string> = {
+									music: "Music",
+									social: "Social",
+									press: "Press",
+									other: "",
+								};
+								return Object.entries(groups).map(([cat, items]) => (
+									<div key={cat}>
+										{headings[cat] !== undefined && headings[cat] !== "" && (
+											<div className="px-2 pt-1 text-[10px] font-bold uppercase opacity-50">{headings[cat]}</div>
+										)}
+										{items.map((l) => (
+											<a
+												key={l.id}
+												className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
+												href={l.url}
+												target="_blank"
+												rel="noopener noreferrer"
+											>
+												{l.icon ? (
+													// eslint-disable-next-line @next/next/no-img-element
+													<img src={l.icon} alt="" className="h-5 w-5" />
+												) : (
+													<span className="h-5 w-5" />
+												)}
+												{l.label} <span className="ml-auto opacity-60">↗</span>
+											</a>
+										))}
+									</div>
+								));
+							})()}
 						</div>
 						<div className="mx-1 border-t border-[#d5d2c8]" />
 						<div className="flex items-center justify-between bg-linear-to-r from-[#e6e3d3] to-[#ece9d8] p-1.5">
@@ -721,6 +1067,8 @@ export default function Home() {
 								onClick={() => {
 									setWins([]);
 									setStartOpen(false);
+									// "turning off" actually boots into the hidden game
+									setPowerState("booting");
 								}}
 							>
 								<span className="text-lg">⏻</span> Turn Off Computer
@@ -730,5 +1078,57 @@ export default function Home() {
 				</div>
 			)}
 		</div>
+	);
+}
+
+function DesktopIcon({
+	icon,
+	label,
+	onOpen,
+	href,
+}: {
+	icon: string;
+	label: string;
+	onOpen?: () => void;
+	href?: string;
+}) {
+	const content = (
+		<>
+			{/* eslint-disable-next-line @next/next/no-img-element */}
+			<img src={icon} alt="" className="h-9 w-9 drop-shadow-[1px_1px_2px_rgba(0,0,0,0.6)]" />
+			<span
+				className="icon-label rounded px-1 text-[11px] leading-tight text-white"
+				style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.9)" }}
+			>
+				{label}
+			</span>
+		</>
+	);
+	const cls =
+		"flex w-20 flex-col items-center gap-1 rounded p-2 text-center focus:outline-none cursor-default";
+	if (href) {
+		return (
+			<a className={`${cls} xp-desktop-icon`} href={href} target="_blank" rel="noopener noreferrer">
+				{content}
+			</a>
+		);
+	}
+	return (
+		<button className={`${cls} xp-desktop-icon`} onClick={onOpen}>
+			{content}
+		</button>
+	);
+}
+
+function TaskbarAuth({ onOpenAdmin }: { onOpenAdmin: () => void }) {
+	const { user } = useAuth();
+	return (
+		<button
+			className="xp-task-btn"
+			onClick={onOpenAdmin}
+			title={user ? `Logged in as ${user.name}` : "Not logged in"}
+		>
+			<span>{user ? "👤" : "🔒"}</span>
+		</button>
 	);
 }

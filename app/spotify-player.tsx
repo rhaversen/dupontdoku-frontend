@@ -9,17 +9,10 @@ type Track = {
 	albumImage: string | null;
 	durationMs: number;
 	spotifyUrl: string;
-	previewUrl: string | null;
-};
-
-type WebPlaybackTrack = {
-	name: string;
-	artists: Array<{ name: string }>;
-	album: { images: Array<{ url: string }> };
 };
 
 type WebPlaybackState = {
-	track_window: { current_track: WebPlaybackTrack };
+	track_window: { current_track: { uri: string; id: string | null } };
 	paused: boolean;
 	position: number;
 	duration: number;
@@ -40,14 +33,19 @@ declare global {
 
 type SpotifyPlayer = {
 	connect: () => Promise<boolean>;
+	disconnect: () => void;
 	addListener: {
 		(event: "ready", cb: (state: { device_id: string }) => void): void;
-		(event: "player_state_changed", cb: (state: WebPlaybackState) => void): void;
+		(event: "not_ready", cb: (state: { device_id: string }) => void): void;
+		(event: "player_state_changed", cb: (state: WebPlaybackState | null) => void): void;
 		(event: string, cb: (state: unknown) => void): void;
 	};
 	pause: () => Promise<void>;
 	resume: () => Promise<void>;
+	togglePlay: () => Promise<void>;
 	seek: (ms: number) => Promise<void>;
+	setVolume: (v: number) => Promise<void>;
+	getCurrentState: () => Promise<WebPlaybackState | null>;
 };
 
 function loadPlaybackSdk(): Promise<void> {
@@ -79,6 +77,13 @@ export const SPOTIFY_CONNECTED_EVENT = "dupontdoku:spotify-connected";
 export const SPOTIFY_AUTH_FAILED_EVENT = "dupontdoku:spotify-auth-failed";
 export const SPOTIFY_AUTH_OPEN_EVENT = "dupontdoku:spotify-auth-open";
 export const SPOTIFY_AUTH_CLOSE_EVENT = "dupontdoku:spotify-auth-close";
+
+// one deterministic state machine drives everything:
+//   idle      — no token; visitor hasn't connected their account
+//   loading   — fetching token / spinning up the SDK player
+//   ready     — device registered with Spotify, playback possible
+//   authNeeded — login required or the account lacks Premium
+type Phase = "idle" | "loading" | "ready" | "authNeeded";
 
 async function isConnected(): Promise<boolean> {
 	try {
@@ -131,22 +136,20 @@ export function SpotifyPlayer() {
 	const [artistName, setArtistName] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [current, setCurrent] = useState(0);
+	const [phase, setPhase] = useState<Phase>("idle");
 	const [playing, setPlaying] = useState(false);
-	const [time, setTime] = useState(0);
-	// "premium": full playback via Web Playback SDK, "link": not connected
-	const [playbackMode, setPlaybackMode] = useState<"loading" | "premium" | "link">("loading");
-	const [deviceReady, setDeviceReady] = useState(false);
-	const [needsLogin, setNeedsLogin] = useState(false);
-	// true once the backend reports an OAuth token — the user completed login.
-	// Auth itself runs in the auth window; the player only reacts to its events.
-	const [authed, setAuthed] = useState(false);
-	// bump when the user completes login so the token/player setup re-runs
-	const [loginAttempt, setLoginAttempt] = useState(0);
+	// position/duration come from the SDK state, interpolated between events
+	const [positionMs, setPositionMs] = useState(0);
+	const [durationMs, setDurationMs] = useState(0);
+	const [volume, setVolume] = useState(0.8);
 
-	const audioRef = useRef<HTMLAudioElement | null>(null);
 	const playerRef = useRef<SpotifyPlayer | null>(null);
 	const deviceIdRef = useRef<string | null>(null);
-	const tokenRef = useRef<string | null>(null);
+	// bumped when the user (dis)connects so the player setup re-runs
+	const [session, setSession] = useState(0);
+	const connectRef = useRef(false);
+	// true while the user drags the seek slider; pauses interpolation
+	const scrubbingRef = useRef(false);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -156,292 +159,229 @@ export function SpotifyPlayer() {
 				if (cancelled) return;
 				if (data.error) setError(data.error);
 				else {
-					setTracks(data.tracks ?? []);
+					setTracks((data.tracks ?? []).map((t) => ({ ...t, previewUrl: undefined })) as Track[]);
 					setArtistName(data.artistName ?? "");
 				}
 			})
-			.catch(() => !cancelled && setError("Failed to load Spotify catalog"));
+			.catch(() => {
+				if (!cancelled) setError("Failed to load Spotify catalog");
+			});
 		return () => {
 			cancelled = true;
 		};
 	}, []);
 
 	// the auth window fires this once the OAuth callback completes; re-run the
-	// token/player setup — if this browser is now connected we go premium
+	// player setup — if this browser is now connected we get a token
 	useEffect(() => {
-		const onConnected = () => setLoginAttempt((n) => n + 1);
+		const onConnected = () => setSession((n) => n + 1);
 		window.addEventListener(SPOTIFY_CONNECTED_EVENT, onConnected);
 		return () => window.removeEventListener(SPOTIFY_CONNECTED_EVENT, onConnected);
 	}, []);
 
-	// The playback-token endpoint returns a Premium user's OAuth token after
-	// they log in via the backend's Spotify auth flow.
+	// single effect owning the SDK lifecycle, keyed on `session`
 	useEffect(() => {
 		let cancelled = false;
-		const setupPlayer = async () => {
-			try {
-				setPlaybackMode("loading");
-				setNeedsLogin(false);
-				const res = await fetch("/api/spotify-auth/playback-token");
-				// 204 = this browser has not connected its own Spotify account
-				if (!res.ok || res.status === 204) {
-					if (!cancelled) {
-						setPlaybackMode("link");
-						setNeedsLogin(true);
-					}
+		let player: SpotifyPlayer | null = null;
+
+		const setup = async () => {
+			setPhase("loading");
+			const res = await fetch("/api/spotify-auth/playback-token");
+			if (res.status === 204 || !res.ok) {
+				if (!cancelled) setPhase("idle");
+				return;
+			}
+			const { token } = (await res.json()) as { token: string };
+			if (cancelled) return;
+
+			await loadPlaybackSdk();
+			if (cancelled || !window.Spotify) return;
+
+			player = new window.Spotify.Player({
+				name: "Dupontdoku XP",
+				getOAuthToken: (cb) => {
+					fetch("/api/spotify-auth/playback-token")
+						.then((r) => (r.ok ? r.json() : Promise.reject(new Error("no token"))))
+						.then((d: { token: string }) => cb(d.token))
+						.catch(() => {});
+				},
+				volume,
+			});
+			playerRef.current = player;
+
+			player.addListener("ready", ({ device_id }) => {
+				if (cancelled) return;
+				deviceIdRef.current = device_id;
+				setPhase("ready");
+			});
+			player.addListener("not_ready", () => {
+				if (!cancelled) setPhase("loading");
+			});
+			player.addListener("player_state_changed", (state) => {
+				if (cancelled) return;
+				if (!state) {
+					// null state = playback moved off this device
+					setPlaying(false);
 					return;
 				}
-				const data = (await res.json()) as { token: string };
-				if (cancelled) return;
-				setAuthed(true);
-				tokenRef.current = data.token;
-				await loadPlaybackSdk();
-				if (cancelled || !window.Spotify) return;
-				const player = new window.Spotify.Player({
-					name: "Dupontdoku XP",
-					getOAuthToken: (cb) => {
-						// refresh the token when the SDK asks for one
-						fetch("/api/spotify-auth/playback-token")
-							.then((r) => (r.ok ? r.json() : Promise.reject()))
-							.then((d: { token: string }) => cb(d.token))
-							.catch(() => {});
-					},
-					volume: 0.8,
-				});
-				playerRef.current = player;
-				player.addListener("ready", ({ device_id }) => {
-					deviceIdRef.current = device_id;
-					setDeviceReady(true);
-					setPlaybackMode("premium");
-				});
-				player.addListener("player_state_changed", (state) => {
-					if (!state) return;
-					setPlaying(!state.paused);
-					setTime(state.position / 1000);
-				});
-				player.addListener("initialization_error", () => {
-					setPlaybackMode("link");
-					setNeedsLogin(true);
-				});
-				player.addListener("authentication_error", () => {
-					setPlaybackMode("link");
-					setNeedsLogin(true);
-				});
-				player.addListener("account_error", () => {
-					// account lacks Spotify Premium — login was fine, playback is not
-					setPlaybackMode("link");
-				});
-				await player.connect();
-			} catch {
-				if (!cancelled) setPlaybackMode("link");
-			}
+				setPlaying(!state.paused);
+				if (!scrubbingRef.current) {
+					setPositionMs(state.position);
+					setDurationMs(state.duration);
+				}
+				const uri = state.track_window.current_track.id;
+				if (uri) {
+					const idx = (tracks ?? []).findIndex((t) => t.id === uri);
+					if (idx >= 0) setCurrent(idx);
+				}
+			});
+			player.addListener("initialization_error", () => {
+				if (!cancelled) setPhase("authNeeded");
+			});
+			player.addListener("authentication_error", () => {
+				if (!cancelled) setPhase("authNeeded");
+			});
+			player.addListener("account_error", () => {
+				// login fine but no Premium — full playback impossible here
+				if (!cancelled) setPhase("authNeeded");
+			});
+
+			await player.connect();
+			// connect() resolves before `ready`; a late-cancelled player must
+			// not linger, so disconnect on unmount
 		};
-		void setupPlayer();
+
+		void setup().catch(() => {
+			if (!cancelled) setPhase("idle");
+		});
+
 		return () => {
 			cancelled = true;
-			playerRef.current?.pause().catch(() => {});
-			audioRef.current?.pause();
+			player?.pause().catch(() => {});
+			playerRef.current?.disconnect();
+			playerRef.current = null;
+			deviceIdRef.current = null;
+			setPlaying(false);
+			setPositionMs(0);
 		};
-	}, [loginAttempt]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [session]);
+
+	// interpolate position between SDK state events while playing
+	useEffect(() => {
+		if (!playing || scrubbingRef.current) return;
+		const id = setInterval(() => {
+			setPositionMs((p) => Math.min(p + 250, durationMs));
+		}, 250);
+		return () => clearInterval(id);
+	}, [playing, durationMs]);
 
 	// connect flow, fully invisible when possible: status check, then a hidden
 	// iframe OAuth roundtrip; the auth window only appears if Spotify actually
 	// needs the user to click through its login page
-	const connectingRef = useRef(false);
 	const connectSpotify = useCallback(async () => {
-		if (connectingRef.current) return;
-		connectingRef.current = true;
+		if (connectRef.current) return;
+		connectRef.current = true;
 		try {
 			if (await isConnected()) {
-				setLoginAttempt((n) => n + 1);
+				setSession((n) => n + 1);
 				return;
 			}
 			if (await silentSpotifyAuth()) {
-				setLoginAttempt((n) => n + 1);
+				setSession((n) => n + 1);
 				return;
 			}
-			// interaction required — show the auth window
 			window.dispatchEvent(new Event(SPOTIFY_AUTH_OPEN_EVENT));
 		} finally {
-			connectingRef.current = false;
+			connectRef.current = false;
 		}
 	}, []);
 
-	const track = tracks?.[current];
-	const canPlayFull = playbackMode === "premium" && deviceReady;
-	const canPreview = Boolean(track?.previewUrl);
-	// ticking counter for the equalizer animation — updates only while playing
-	const [tick, setTick] = useState(0);
-	// true while the user is dragging the progress slider
-	const [scrubbing, setScrubbing] = useState(false);
-	const [scrubValue, setScrubValue] = useState(0);
+	const playTrack = useCallback(
+		async (index: number) => {
+			const t = tracks?.[index];
+			const deviceId = deviceIdRef.current;
+			const player = playerRef.current;
+			if (!t || !player || !deviceId) return;
+			setCurrent(index);
+			setPositionMs(0);
+			setDurationMs(t.durationMs);
 
-	useEffect(() => {
-		if (!playing) return;
-		const id = setInterval(() => setTick((t) => t + 1), 120);
-		return () => clearInterval(id);
-	}, [playing]);
-
-	// progress: position advances locally; the SDK events / audio element re-sync
-	const activeDurationSec =
-		playbackMode === "premium" ? (track?.durationMs ?? 0) / 1000 : track?.previewUrl ? 30 : (track?.durationMs ?? 0) / 1000;
-
-	useEffect(() => {
-		if (!playing || scrubbing) return;
-		const step = playbackMode === "premium" ? 0.25 : 1 / 60;
-		const id = setInterval(() => {
-			setTime((t) => {
-				if (playbackMode === "premium" && track && t + step > track.durationMs / 1000) {
-					// the next player_state_changed event (track end) takes over
-					return t;
-				}
-				if (playbackMode !== "premium" && t + step >= 30) {
-					setPlaying(false);
-					return 0;
-				}
-				return t + step;
+			const token = await new Promise<string | null>((resolve) => {
+				const res = fetch("/api/spotify-auth/playback-token")
+					.then((r) => (r.ok ? r.json() : Promise.resolve(null)))
+					.then((d: { token: string } | null) => d?.token ?? null)
+					.catch(() => null);
+				resolve(res);
 			});
-		}, playbackMode === "premium" ? 250 : 1000 / 60);
-		return () => clearInterval(id);
-	}, [playing, playbackMode, scrubbing, track]);
+			if (!token) {
+				setPhase("authNeeded");
+				return;
+			}
 
-	const playBackendPreview = useCallback((t: Track, atSeconds = 0) => {
-		audioRef.current?.pause();
-		const audio = new Audio(t.previewUrl!);
-		audioRef.current = audio;
-		audio.currentTime = atSeconds;
-		setPlaying(true);
-		audio.play().catch(() => setPlaying(false));
-		audio.onended = () => setPlaying(false);
-	}, []);
+			const doPlay = () =>
+				fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+					method: "PUT",
+					headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+					body: JSON.stringify({ uris: [`spotify:track:${t.id}`] }),
+				});
 
-	const playFullTrack = useCallback(async (t: Track): Promise<boolean> => {
-		const deviceId = deviceIdRef.current;
-		const token = tokenRef.current;
-		if (!deviceId || !token) return false;
+			let res = await doPlay();
+			if (res.status === 404) {
+				// device registration can lag behind the ready event — retry once
+				await new Promise((r) => setTimeout(r, 700));
+				res = await doPlay();
+			}
+			if (!res.ok) setPhase("authNeeded");
+		},
+		[tracks],
+	);
 
-		const doPlay = () =>
-			fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-				method: "PUT",
-				headers: {
-					Authorization: `Bearer ${token}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({ uris: [`spotify:track:${t.id}`] }),
-			});
-
-		let res = await doPlay();
-		if (res.status === 404) {
-			// device registration lags behind the ready event — retry once
-			await new Promise((r) => setTimeout(r, 700));
-			res = await doPlay();
-			if (!res.ok) return false;
-		} else if (!res.ok && res.status !== 404) {
-			return false;
-		}
-
-		// Spotify can return 204 yet keep playing the old track (device went
-		// inactive, or the request raced the previous one). Verify that the
-		// current track actually changed; if not, wake the device and retry.
-		const verify = async (): Promise<boolean> => {
-			const state = await fetch("https://api.spotify.com/v1/me/player?market=DK", {
-				headers: { Authorization: `Bearer ${token}` },
-			});
-			if (!state.ok || state.status === 204) return false;
-			const s = (await state.json()) as { item?: { id?: string } };
-			return s.item?.id === t.id;
-		};
-
-		await new Promise((r) => setTimeout(r, 400));
-		if (!(await verify())) {
-			// wake/transfer playback to our device explicitly, then replay
-			await fetch("https://api.spotify.com/v1/me/player", {
-				method: "PUT",
-				headers: {
-					Authorization: `Bearer ${token}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({ device_ids: [deviceId], play: false }),
-			});
-			await new Promise((r) => setTimeout(r, 300));
-			res = await doPlay();
-			if (!res.ok) return false;
-			await new Promise((r) => setTimeout(r, 400));
-			if (!(await verify())) return false;
-		}
-
-		setPlaying(true);
-		setTime(0);
-		return true;
-	}, []);
-
-	async function play(index: number) {
-		const t = tracks?.[index];
-		if (!t) return;
-		setCurrent(index);
-		setTime(0);
-		if (canPlayFull) {
-			const ok = await playFullTrack(t);
-			if (ok) return;
-			// play request failed even after retry — fall through to preview
-		}
-		if (t.previewUrl) {
-			playBackendPreview(t);
+	const togglePlay = useCallback(async () => {
+		const player = playerRef.current;
+		if (!player) {
+			if (phase === "idle") void connectSpotify();
 			return;
 		}
-		if (!authed) {
-			// not connected — run the silent connect flow, show the auth window
-			// only if Spotify requires interaction
-			void connectSpotify();
-		}
-	}
-
-	async function togglePlay() {
-		if (playbackMode === "premium") {
-			if (playing) {
-				await playerRef.current!.pause();
-				setPlaying(false);
-			} else {
-				await playerRef.current!.resume();
-				setPlaying(true);
-			}
+		const state = await player.getCurrentState();
+		if (!state) {
+			// SDK connected but nothing queued yet — start the current track
+			await playTrack(current);
 			return;
 		}
-		const audio = audioRef.current;
-		if (audio) {
-			if (playing) {
-				audio.pause();
-				setPlaying(false);
-			} else {
-				await audio.play();
-				setPlaying(true);
-			}
-		} else if (track) {
-			await play(current);
-		}
-	}
+		await player.togglePlay();
+	}, [phase, current, playTrack, connectSpotify]);
 
-	function seekTo(seconds: number) {
-		setTime(seconds);
-		if (playbackMode === "premium") {
-			void playerRef.current?.seek(Math.round(seconds * 1000)).catch(() => {});
-		} else if (audioRef.current && track?.previewUrl) {
-			audioRef.current.currentTime = seconds;
-		}
-	}
-
-	async function stop() {
+	const stop = useCallback(async () => {
 		await playerRef.current?.pause().catch(() => {});
-		audioRef.current?.pause();
 		setPlaying(false);
-		setTime(0);
-	}
+		setPositionMs(0);
+	}, []);
 
-	function skip(delta: number) {
-		const next = Math.min(Math.max(current + delta, 0), (tracks?.length ?? 1) - 1);
-		if (next !== current) play(next);
-		else stop();
-	}
+	const skip = useCallback(
+		(delta: number) => {
+			if (!tracks) return;
+			const next = Math.min(Math.max(current + delta, 0), tracks.length - 1);
+			if (next === current) return;
+			if (playing && phase === "ready") {
+				void playTrack(next);
+			} else {
+				setCurrent(next);
+				setPositionMs(0);
+			}
+		},
+		[current, tracks, playing, phase, playTrack],
+	);
+
+	const seekTo = useCallback((seconds: number) => {
+		setPositionMs(seconds * 1000);
+		void playerRef.current?.seek(Math.round(seconds * 1000)).catch(() => {});
+	}, []);
+
+	// keep volume in sync with the SDK player
+	useEffect(() => {
+		void playerRef.current?.setVolume(volume).catch(() => {});
+	}, [volume]);
 
 	if (error) {
 		return (
@@ -469,92 +409,81 @@ export function SpotifyPlayer() {
 		);
 	}
 
-	const modeLabel =
-		playbackMode === "premium"
-			? deviceReady
-				? "full playback — connected"
-				: "connecting player..."
-			: canPreview
-				? "30s previews"
-				: "connect Spotify to play";
+	const track = tracks[current];
+	const statusLabel =
+		phase === "ready"
+			? "full playback — connected"
+			: phase === "loading"
+				? "connecting player..."
+				: phase === "authNeeded"
+					? "connect a Premium account to play"
+					: "connect Spotify to play";
 
 	return (
 		<div>
 			<div className="flex items-center gap-3">
-				{track?.albumImage && (
+				{track.albumImage && (
 					// eslint-disable-next-line @next/next/no-img-element
-					<img
-						src={track.albumImage}
-						alt={track.name}
-						className="xp-inset h-16 w-16 rounded-sm object-cover"
-					/>
+					<img src={track.albumImage} alt={track.name} className="xp-inset h-16 w-16 rounded-sm object-cover" />
 				)}
 				<div className="min-w-0 flex-1">
-					<div className="truncate text-[12px] font-bold">{track?.name}</div>
-					<div className="truncate text-[11px] opacity-70">{track?.artists.join(", ")}</div>
-					<div className="truncate text-[10px] opacity-50">{modeLabel}</div>
+					<div className="truncate text-[12px] font-bold">{track.name}</div>
+					<div className="truncate text-[11px] opacity-70">{track.artists.join(", ")}</div>
+					<div className="truncate text-[10px] opacity-50">{statusLabel}</div>
 				</div>
 			</div>
 			<div className="mt-2 flex items-center gap-2">
 				<button className="xp-btn px-2 text-[12px]" onClick={() => skip(-1)} aria-label="Previous track" disabled={current === 0}>
 					⏮
 				</button>
-				<button className="xp-btn px-3 text-[12px]" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
+				<button className="xp-btn px-3 text-[12px]" onClick={() => void togglePlay()} aria-label={playing ? "Pause" : "Play"}>
 					{playing ? "⏸" : "▶"}
 				</button>
-				<button className="xp-btn px-2 text-[12px]" onClick={stop} aria-label="Stop">
+				<button className="xp-btn px-2 text-[12px]" onClick={() => void stop()} aria-label="Stop">
 					⏹
 				</button>
 				<button className="xp-btn px-2 text-[12px]" onClick={() => skip(1)} aria-label="Next track" disabled={current >= tracks.length - 1}>
 					⏭
 				</button>
-				<div className="h-5 w-16 rounded-sm border border-[#7f9db9] bg-white p-0.5">
-					<div className="flex h-full gap-0.5">
-						{Array.from({ length: 10 }).map((_, i) => {
-							const level = playing
-								? (Math.sin(tick * 0.35 + i * 0.9) * 0.5 + 0.5) * 11 + 4
-								: 13;
-							return (
-								<div
-									key={i}
-									className={`w-1 ${i < Math.min(15, level) ? "bg-[#3772d6]" : "bg-[#c8d8f0]"}`}
-								/>
-							);
-						})}
-					</div>
-				</div>
+				<label className="ml-1 flex items-center gap-1 text-[10px] opacity-70" title="Volume">
+					🔊
+					<input
+						type="range"
+						min={0}
+						max={1}
+						step={0.05}
+						value={volume}
+						onChange={(e) => setVolume(Number(e.target.value))}
+						className="h-1.5 w-16 cursor-pointer appearance-none rounded-full bg-white accent-[#3772d6]"
+						style={{ border: "1px solid #7f9db9" }}
+						aria-label="Volume"
+					/>
+				</label>
 			</div>
 			<div className="mt-1.5 flex items-center gap-2">
-				<span className="w-8 text-right text-[10px] tabular-nums opacity-60">
-					{formatTime(scrubbing ? scrubValue : time)}
-				</span>
+				<span className="w-8 text-right text-[10px] tabular-nums opacity-60">{formatTime(positionMs / 1000)}</span>
 				<input
 					type="range"
 					min={0}
-					max={Math.max(1, activeDurationSec)}
+					max={Math.max(1, durationMs / 1000)}
 					step={0.1}
-					value={scrubbing ? scrubValue : Math.min(time, activeDurationSec)}
+					value={Math.min(positionMs / 1000, durationMs / 1000)}
 					onPointerDown={() => {
-						setScrubbing(true);
-						setScrubValue(time);
+						scrubbingRef.current = true;
 					}}
-					onChange={(e) => setScrubValue(Number(e.target.value))}
+					onChange={(e) => setPositionMs(Number(e.target.value) * 1000)}
 					onPointerUp={(e) => {
 						seekTo(Number((e.target as HTMLInputElement).value));
-						setScrubbing(false);
+						scrubbingRef.current = false;
 					}}
-					onKeyUp={(e) => {
-						seekTo(Number((e.target as HTMLInputElement).value));
-					}}
+					onKeyUp={(e) => seekTo(Number((e.target as HTMLInputElement).value))}
 					className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white accent-[#3772d6]"
 					style={{ border: "1px solid #7f9db9" }}
 					aria-label="Seek"
 				/>
-				<span className="w-8 text-[10px] tabular-nums opacity-60">
-					{formatTime(activeDurationSec)}
-				</span>
+				<span className="w-8 text-[10px] tabular-nums opacity-60">{formatTime(durationMs / 1000)}</span>
 			</div>
-			{needsLogin && playbackMode === "link" && (
+			{(phase === "idle" || phase === "authNeeded") && (
 				<div className="mt-2 rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
 					<div className="font-bold">Play the full tracks right here</div>
 					<div className="mt-0.5">
@@ -575,18 +504,14 @@ export function SpotifyPlayer() {
 							className={`flex items-center gap-2 rounded px-2 py-1 text-left text-[11px] ${
 								isCurrent ? "bg-[#316ac5] text-white" : "hover:bg-[#316ac5] hover:text-white"
 							}`}
-							onClick={() => (isCurrent && playing ? togglePlay() : play(i))}
+							onClick={() => (isCurrent && playing ? void togglePlay() : void playTrack(i))}
 						>
-							<span className="w-4 text-center opacity-90">
-								{isCurrent && playing ? "⏸" : "▶"}
-							</span>
+							<span className="w-4 text-center opacity-90">{isCurrent && playing ? "⏸" : "▶"}</span>
 							<span className="flex-1 truncate">
 								{t.name}
 								{isCurrent && playing && <span className="ml-1 opacity-70">(playing)</span>}
 							</span>
-							<span className={`text-[10px] ${isCurrent ? "" : "opacity-60"}`}>
-								{formatTime(t.durationMs / 1000)}
-							</span>
+							<span className={`text-[10px] ${isCurrent ? "" : "opacity-60"}`}>{formatTime(t.durationMs / 1000)}</span>
 						</button>
 					);
 				})}
@@ -595,15 +520,16 @@ export function SpotifyPlayer() {
 				<span>
 					{tracks.length} tracks{artistName ? ` from ${artistName}` : ""}
 				</span>
-				{authed && (
+				{phase !== "idle" && (
 					<button
 						className="text-[#0000cc] underline"
 						onClick={async () => {
+							playerRef.current?.disconnect();
+							playerRef.current = null;
 							await fetch("/api/spotify-auth/disconnect", { method: "POST" });
-							setAuthed(false);
-
-							setDeviceReady(false);
-							setLoginAttempt((n) => n + 1);
+							setPhase("idle");
+							setPlaying(false);
+							setPositionMs(0);
 						}}
 					>
 						Disconnect Spotify
