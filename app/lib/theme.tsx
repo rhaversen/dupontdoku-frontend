@@ -23,9 +23,12 @@ const STORAGE_KEY = "dupontdoku-theme";
 export function ThemeProvider({ children }: { children: ReactNode }) {
 	const [theme, setTheme] = useState<ThemeId>("xp");
 
+	// hydrate from localStorage and mirror the theme onto <html>; one effect
+	// for both keeps the DOM class always in sync with the state value
 	useEffect(() => {
 		const stored = window.localStorage.getItem(STORAGE_KEY) as ThemeId | null;
-		if (stored && THEMES.some((t) => t.id === stored)) setTheme(stored);
+		const initial = stored && THEMES.some((t) => t.id === stored) ? stored : "xp";
+		setTheme((cur) => (cur === initial ? cur : initial));
 	}, []);
 
 	// the theme class restyles every mock-* chrome element in the page; the

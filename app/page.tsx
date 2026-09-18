@@ -851,11 +851,7 @@ export default function Home() {
 			.catch(() => { });
 	}, []);
 
-	const bringToFront = useCallback((id: SectionId) => {
-		setZOrder((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((w) => w !== id), id]));
-	}, []);
-
-	const openSection = useCallback((id: SectionId) => {
+	const openSection = (id: SectionId) => {
 		setWins((prev) =>
 			prev.some((w) => w.id === id)
 				? prev.map((w) => (w.id === id ? { ...w, minimized: false } : w))
@@ -874,7 +870,7 @@ export default function Home() {
 		);
 		bringToFront(id);
 		setStartOpen(false);
-	}, [bringToFront]);
+	};
 
 	// the Spotify player asks the desktop to open the auth window
 	// (instead of a browser popup)
@@ -889,7 +885,11 @@ export default function Home() {
 			window.removeEventListener(SPOTIFY_AUTH_OPEN_EVENT, onAuthOpen);
 			window.removeEventListener(SPOTIFY_AUTH_CLOSE_EVENT, onAuthClose);
 		};
-	}, [openSection]);
+	}, []);
+
+	const bringToFront = useCallback((id: SectionId) => {
+		setZOrder((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((w) => w !== id), id]));
+	}, []);
 
 	// taskbar keeps its open-order; clicking a non-minimized taskbar button
 	// minimizes it, anything else focuses (and un-minimizes) it

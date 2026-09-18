@@ -366,6 +366,205 @@ html.t-next .xp-tray {
 	color: #eee;
 }
 
+/* NeXT: force readable ink on every light/transparent surface.
+   The XP page uses hardcoded light tints (statusbar bg, hover tints, table
+   headers, toolbar) that would otherwise render as white-on-white here. */
+html.t-next .xp-window,
+html.t-next .xp-statusbar,
+html.t-next .xp-toolbar {
+	color: #eee;
+}
+html.t-next .xp-statusbar {
+	background: #4c4c4c;
+	border-top-color: #000;
+}
+html.t-next .xp-statusbar .xp-status-cell {
+	background: #3a3a3a;
+	border-color: #000;
+	color: #9fe89f;
+}
+html.t-next .xp-inset,
+html.t-next .xp-inset * {
+	color: #9fe89f;
+}
+html.t-next .xp-toolbar {
+	background: linear-gradient(to bottom, #777, #5a5a5a);
+	border-bottom-color: #000;
+}
+html.t-next .xp-toolbar-btn {
+	color: #eee;
+}
+html.t-next .xp-toolbar-btn:hover {
+	background: #6a6a6a;
+	border-color: #000;
+}
+html.t-next table th {
+	background: #6e6e6e;
+	color: #eee;
+}
+html.t-next table td {
+	color: #ddd;
+}
+html.t-next table tr:hover > td {
+	background: #6a6a6a;
+}
+html.t-next a {
+	color: #9fe89f;
+}
+html.t-next .xp-welcome-link {
+	color: #9fe89f;
+}
+html.t-next .xp-welcome-link:hover {
+	background: rgba(159, 232, 159, 0.12);
+}
+html.t-next .xp-title-icon img {
+	filter: grayscale(1) brightness(1.6);
+}
+html.t-next .xp-desktop-icon .icon-label {
+	background: rgba(0, 0, 0, 0.4);
+}
+
+/* AMIGA: readable ink on light surfaces */
+html.t-amiga .xp-statusbar {
+	background: #b0b0b0;
+	border-top-color: #000;
+	color: #000;
+}
+html.t-amiga .xp-statusbar .xp-status-cell {
+	background: #b0b0b0;
+	border-color: #000;
+	color: #000;
+}
+html.t-amiga .xp-inset,
+html.t-amiga .xp-inset * {
+	color: #000;
+}
+html.t-amiga table th {
+	background: #b0b0b0;
+	color: #000;
+}
+html.t-amiga table td {
+	color: #000;
+}
+html.t-amiga a {
+	color: #0000cc;
+}
+html.t-amiga .xp-welcome-link {
+	color: #0000cc;
+}
+
+/* MAC: readable ink on light surfaces */
+html.t-mac .xp-statusbar {
+	background: #d4d0c8;
+	border-top-color: #000;
+	color: #333;
+}
+html.t-mac .xp-statusbar .xp-status-cell {
+	background: #d4d0c8;
+	border-color: #000;
+	color: #333;
+}
+html.t-mac .xp-inset,
+html.t-mac .xp-inset * {
+	color: #111;
+}
+html.t-mac table th {
+	background: #d4d0c8;
+	color: #111;
+}
+html.t-mac table td {
+	color: #111;
+}
+html.t-mac a {
+	color: #0000cc;
+}
+html.t-mac .xp-welcome-link {
+	color: #0000cc;
+}
+html.t-mac .xp-toolbar {
+	background: #d4d0c8;
+	border-bottom-color: #000;
+}
+html.t-mac .xp-toolbar-btn {
+	color: #111;
+}
+
+/* FICT: readable ink on light surfaces */
+html.t-fict .xp-statusbar {
+	background: #d6d2c4;
+	border-top-color: #55504a;
+	color: #1c1a16;
+}
+html.t-fict .xp-statusbar .xp-status-cell {
+	background: #d6d2c4;
+	border-color: #55504a;
+	color: #1c1a16;
+}
+html.t-fict .xp-inset,
+html.t-fict .xp-inset * {
+	color: #1c1a16;
+}
+html.t-fict table th {
+	background: #c8c2b2;
+	color: #1c1a16;
+}
+html.t-fict table td {
+	color: #1c1a16;
+}
+html.t-fict a {
+	color: #0000cc;
+}
+html.t-fict .xp-welcome-link {
+	color: #0000cc;
+}
+html.t-fict .xp-toolbar {
+	background: #d6d2c4;
+	border-bottom-color: #55504a;
+}
+html.t-fict .xp-toolbar-btn {
+	color: #1c1a16;
+}
+
+/* ---- theme picker: native dropdown options must always be dark-on-light,
+   because the OS renders the popup on a white surface regardless of theme ---- */
+select[aria-label="Theme"] option {
+	background: #fff;
+	color: #000;
+}
+
+/* ---- Next.js dev-tools toast ("a new update is available", version check,
+   build activity) renders inside the nextjs-portal shadow DOM with its own
+   light theme — force dark-on-light readability under every theme. ---- */
+nextjs-portal[nextjs-portal],
+nextjs-portal {
+	--color-background-100: #ffffff;
+	--color-gray-900: #171717;
+	--color-gray-800: #262626;
+	--color-gray-700: #404040;
+	--color-gray-500: #737373;
+	--color-gray-400: #a3a3a3;
+	--color-gray-300: #d4d4d4;
+	--color-gray-200: #e5e5e5;
+	--color-gray-100: #f5f5f5;
+	--color-gray-0: #ffffff;
+	--color-accents-1: #171717;
+	--color-accents-2: #404040;
+	--color-accents-3: #737373;
+	--color-accents-4: #a3a3a3;
+	--color-accents-5: #d4d4d4;
+	--color-accents-6: #ededed;
+	--color-accents-7: #fafafa;
+	--color-accents-8: #ffffff;
+}
+nextjs-portal .nextjs-toast,
+nextjs-portal [data-nextjs-toast],
+nextjs-portal .dev-tools-indicator-menu,
+nextjs-portal .dev-tools-indicator-item,
+nextjs-portal .version-staleness-indicator,
+nextjs-portal [data-nextjs-version-checker] {
+	color: #171717;
+}
+
 /* FICT */
 html.t-fict .xp-window {
 	background: #d6d2c4;
