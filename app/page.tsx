@@ -107,20 +107,53 @@ const DESKTOP_WINDOW_WIDTHS: Partial<Record<SectionId, number>> = {
 const DEFAULT_OPEN: SectionId[] = ["welcome", "tour", "about"];
 
 // horizontal strip layout for the default windows: side by side on the same
-// height, each advanced by the previous window's width plus a gap. Position
-// derives from the open slot and is computed once — no re-flow, free dragging
-// afterwards.
+// height, evenly spaced inside the viewport. The available width is measured
+// (accounting for the desktop zoom) so the strip can never spill off-screen;
+// window widths shrink proportionally if needed.
 const ROW_ORIGIN = { x: 170, y: 40 };
 const ROW_GAP = 16;
+const ROW_MARGIN_RIGHT = 24;
+const MIN_WINDOW_WIDTH = 280;
 
-function rowPosition(openIndex: number): Point {
-	// walk the desktop widths in open order to find where this slot lands
+function useDesktopLayout() {
+	const [viewport, setViewport] = useState({ w: 1280, h: 800 });
+	const [scale, setScale] = useState(1);
+
+	useEffect(() => {
+		const measure = () => {
+			setViewport({ w: window.innerWidth, h: window.innerHeight });
+			const raw = getComputedStyle(document.documentElement).getPropertyValue("--desktop-scale");
+			const parsed = Number.parseFloat(raw);
+			setScale(Number.isFinite(parsed) && parsed > 0 ? parsed : 1);
+		};
+		measure();
+		window.addEventListener("resize", measure);
+		return () => window.removeEventListener("resize", measure);
+	}, []);
+
+	// CSS-pixel space inside the zoomed container = viewport / scale
+	const available = Math.max(400, viewport.w / scale - ROW_ORIGIN.x - ROW_MARGIN_RIGHT);
+
+	const widths = DEFAULT_OPEN.map((id) => DESKTOP_WINDOW_WIDTHS[id] ?? 400);
+	const naturalTotal = widths.reduce((a, b) => a + b, 0) + ROW_GAP * (widths.length - 1);
+	// shrink all windows proportionally when the natural total overflows
+	const shrink = naturalTotal > available ? (available - ROW_GAP * (widths.length - 1)) / widths.reduce((a, b) => a + b, 0) : 1;
+	const fitted = widths.map((w) => Math.max(MIN_WINDOW_WIDTH, Math.round(w * shrink)));
+
+	// distribute whatever space is left as even gaps between the windows
+	const total = fitted.reduce((a, b) => a + b, 0);
+	const gap = widths.length > 1 ? Math.max(8, (available - total) / (widths.length - 1)) : 0;
+
+	const positions: Record<string, Point> = {};
+	const windowWidths: Record<string, number> = {};
 	let x = ROW_ORIGIN.x;
-	for (let i = 0; i < openIndex; i++) {
-		x += DESKTOP_WINDOW_WIDTHS[DEFAULT_OPEN[i] ?? "about"] ?? 400;
-		x += ROW_GAP;
-	}
-	return { x, y: ROW_ORIGIN.y };
+	DEFAULT_OPEN.forEach((id, i) => {
+		positions[id] = { x: Math.round(x), y: ROW_ORIGIN.y };
+		windowWidths[id] = fitted[i];
+		x += fitted[i] + gap;
+	});
+
+	return { positions, windowWidths, scale };
 }
 
 // random desktop spot for manually opened windows, clamped to stay on screen
@@ -156,6 +189,7 @@ function DraggableWindow({
 	focused,
 	z,
 	initial,
+	widthOverride,
 	mobile = false,
 }: {
 	section: SectionId;
@@ -169,6 +203,7 @@ function DraggableWindow({
 	focused: boolean;
 	z: number;
 	initial?: Point;
+	widthOverride?: number;
 	mobile?: boolean;
 }) {
 	const [pos, setPos] = useState<Point>(initial ?? { x: 80, y: 60 });
@@ -224,7 +259,7 @@ function DraggableWindow({
 			style={{
 				left: maximized ? 0 : pos.x,
 				top: maximized ? 0 : pos.y,
-				width: maximized ? "100%" : (DESKTOP_WINDOW_WIDTHS[section] ?? 400),
+				width: maximized ? "100%" : (widthOverride ?? DESKTOP_WINDOW_WIDTHS[section] ?? 400),
 				height: maximized ? "calc(100% - 32px)" : "auto",
 				maxHeight: maximized ? undefined : "calc(100% - 48px)",
 				zIndex: z,
@@ -816,7 +851,11 @@ export default function Home() {
 			.catch(() => { });
 	}, []);
 
-	const openSection = (id: SectionId) => {
+	const bringToFront = useCallback((id: SectionId) => {
+		setZOrder((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((w) => w !== id), id]));
+	}, []);
+
+	const openSection = useCallback((id: SectionId) => {
 		setWins((prev) =>
 			prev.some((w) => w.id === id)
 				? prev.map((w) => (w.id === id ? { ...w, minimized: false } : w))
@@ -835,7 +874,7 @@ export default function Home() {
 		);
 		bringToFront(id);
 		setStartOpen(false);
-	};
+	}, [bringToFront]);
 
 	// the Spotify player asks the desktop to open the auth window
 	// (instead of a browser popup)
@@ -850,11 +889,7 @@ export default function Home() {
 			window.removeEventListener(SPOTIFY_AUTH_OPEN_EVENT, onAuthOpen);
 			window.removeEventListener(SPOTIFY_AUTH_CLOSE_EVENT, onAuthClose);
 		};
-	}, []);
-
-	const bringToFront = useCallback((id: SectionId) => {
-		setZOrder((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((w) => w !== id), id]));
-	}, []);
+	}, [openSection]);
 
 	// taskbar keeps its open-order; clicking a non-minimized taskbar button
 	// minimizes it, anything else focuses (and un-minimizes) it
@@ -884,6 +919,7 @@ export default function Home() {
 	};
 
 	const desktopLinks = startLinks.filter((l) => l.location === "desktop");
+	const layout = useDesktopLayout();
 
 	if (powerState === "booting") {
 		return (
@@ -946,7 +982,8 @@ export default function Home() {
 						section={w.id}
 						minimized={false}
 						maximized={w.maximized}
-						initial={w.manualPos ?? rowPosition(w.slot)}
+						initial={w.manualPos ?? layout.positions[w.id] ?? { x: 170, y: 40 }}
+						widthOverride={layout.windowWidths[w.id]}
 						z={zOrder.indexOf(w.id) + 1}
 						focused={zOrder[zOrder.length - 1] === w.id}
 						onClose={() => closeSection(w.id)}
