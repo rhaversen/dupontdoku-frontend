@@ -31,7 +31,7 @@ export default function AuthWindow({ onDone }: { onDone?: () => void }) {
 	};
 
 	if (loading) {
-		return <p className="p-3 text-[12px]">Loading…</p>;
+		return <p className="p-3 text-[12px] opacity-60">Loading…</p>;
 	}
 
 	if (user) {
@@ -42,7 +42,7 @@ export default function AuthWindow({ onDone }: { onDone?: () => void }) {
 				</p>
 				<div className="flex justify-end">
 					<button
-						className="xp-btn px-4"
+						className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-4 py-0.5 hover:bg-accent-soft active:translate-y-px"
 						onClick={() => {
 							void logout();
 						}}
@@ -59,14 +59,14 @@ export default function AuthWindow({ onDone }: { onDone?: () => void }) {
 			<div className="flex gap-1">
 				<button
 					type="button"
-					className={`xp-btn px-3 py-0.5 ${mode === "login" ? "font-bold" : ""}`}
+					className={`border border-accent-border rounded-md px-3 py-0.5 shadow-[0_1px_2px_rgba(0,0,0,0.12)] ${mode === "login" ? "bg-accent-soft font-bold" : "bg-chrome hover:bg-accent-soft/60"}`}
 					onClick={() => setMode("login")}
 				>
 					Log in
 				</button>
 				<button
 					type="button"
-					className={`xp-btn px-3 py-0.5 ${mode === "register" ? "font-bold" : ""}`}
+					className={`border border-accent-border rounded-md px-3 py-0.5 shadow-[0_1px_2px_rgba(0,0,0,0.12)] ${mode === "register" ? "bg-accent-soft font-bold" : "bg-chrome hover:bg-accent-soft/60"}`}
 					onClick={() => setMode("register")}
 				>
 					Register
@@ -78,7 +78,7 @@ export default function AuthWindow({ onDone }: { onDone?: () => void }) {
 					required
 					value={name}
 					onChange={(e) => setName(e.target.value)}
-					className="xp-inset w-44 rounded-sm px-1 py-0.5"
+					className="rounded-md border border-accent-border bg-surface shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] w-44 px-1 py-0.5"
 				/>
 			</label>
 			<label className="flex items-center justify-between gap-2">
@@ -88,7 +88,7 @@ export default function AuthWindow({ onDone }: { onDone?: () => void }) {
 					type="password"
 					value={password}
 					onChange={(e) => setPassword(e.target.value)}
-					className="xp-inset w-44 rounded-sm px-1 py-0.5"
+					className="rounded-md border border-accent-border bg-surface shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] w-44 px-1 py-0.5"
 				/>
 			</label>
 			{mode === "register" && (
@@ -98,13 +98,13 @@ export default function AuthWindow({ onDone }: { onDone?: () => void }) {
 						required
 						value={inviteCode}
 						onChange={(e) => setInviteCode(e.target.value)}
-						className="xp-inset w-44 rounded-sm px-1 py-0.5"
+						className="rounded-md border border-accent-border bg-surface shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] w-44 px-1 py-0.5"
 					/>
 				</label>
 			)}
 			{error && <p className="text-red-700">{error}</p>}
 			<div className="flex justify-end">
-				<button type="submit" className="xp-btn px-4" disabled={busy}>
+				<button type="submit" className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-4 py-0.5 font-bold hover:bg-accent-soft active:translate-y-px disabled:opacity-60" disabled={busy}>
 					{busy ? "…" : mode === "login" ? "Log in" : "Create account"}
 				</button>
 			</div>

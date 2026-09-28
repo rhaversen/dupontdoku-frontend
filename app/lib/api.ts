@@ -4,7 +4,6 @@ export type TourDate = {
 	city: string;
 	venue: string;
 	ticketUrl: string;
-	notes: string;
 	sortOrder: number;
 };
 
@@ -12,7 +11,6 @@ export type BlogPost = {
 	id: string;
 	title: string;
 	body: string;
-	slug: string;
 	published: boolean;
 };
 
@@ -35,9 +33,8 @@ export type LinkItem = {
 };
 
 export type SiteConfig = {
-	welcomeMessage: string;
+	bio: string;
 	contactEmail: string;
-	heroText: string;
 	footerNote: string;
 	generalTicketUrl: string;
 };

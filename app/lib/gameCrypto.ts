@@ -1,7 +1,5 @@
 "use client";
 
-import { api } from "./api";
-
 // non-extractable ECDSA P-256 keypair persisted in IndexedDB — the private
 // key can only be used to sign inside this browser, never exported
 const DB_NAME = "dupontdoku-game";

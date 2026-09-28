@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { VideoPlayer } from "./video-player";
 import {
 	SpotifyPlayer,
@@ -9,9 +9,8 @@ import {
 	SPOTIFY_AUTH_CLOSE_EVENT,
 } from "./spotify-player";
 import AuthWindow from "./auth-window";
-import ThemePicker from "./theme-picker";
 import { BootScreen } from "./boot-screen";
-import { GuestlistDesktop } from "./guestlist-desktop";
+import { GuestlistPanel } from "./guestlist-desktop";
 import { useAuth } from "./lib/auth";
 import { api, type SiteConfig, type TourDate, type BlogPost, type VideoItem, type LinkItem, type Guest } from "./lib/api";
 import { CrudEditor, ConfigEditor, TabbedEditors, type FieldDef } from "./editors";
@@ -22,29 +21,15 @@ type WinState = {
 	id: SectionId;
 	minimized: boolean;
 	maximized: boolean;
-	// fixed position per window: slot index in open order
-	slot: number;
-	// stored position for manually opened windows (random spot on the desktop)
-	manualPos?: Point;
+	// last placed/dragged position, kept so a window returns to its spot
+	pos?: Point;
 };
 
-type SectionId =
-	| "welcome"
-	| "music"
-	| "tour"
-	| "about"
-	| "videos"
-	| "news"
-	| "guestlist"
-	| "admin"
-	| "spotifyAuth";
+type SectionId = "home" | "media" | "news" | "guestlist" | "admin" | "spotifyAuth";
 
 const SECTIONS: Record<SectionId, { icon: string; title: string }> = {
-	welcome: { icon: "/icons/48/welcome.png", title: "Welcome" },
-	music: { icon: "/icons/48/music.png", title: "Music - Windows Media Player" },
-	tour: { icon: "/icons/48/tour.png", title: "Tour Dates" },
-	about: { icon: "/icons/48/readme.png", title: "README.TXT - Notepad" },
-	videos: { icon: "/icons/48/videos.png", title: "Videos - Media Player" },
+	home: { icon: "/icons/48/welcome.png", title: "Home" },
+	media: { icon: "/icons/48/music.png", title: "Media Player" },
 	news: { icon: "/icons/48/readme.png", title: "News - Notepad" },
 	guestlist: { icon: "/icons/48/guestlist.png", title: "Guest List" },
 	admin: { icon: "/icons/48/guestlist.png", title: "Content Manager" },
@@ -56,13 +41,11 @@ const TOUR_FIELDS: FieldDef[] = [
 	{ key: "city", label: "City" },
 	{ key: "venue", label: "Venue" },
 	{ key: "ticketUrl", label: "Ticket URL (per show)", optional: true },
-	{ key: "notes", label: "Notes", optional: true },
 	{ key: "sortOrder", label: "Sort", type: "number", default: 0 },
 ];
 
 const BLOG_FIELDS: FieldDef[] = [
 	{ key: "title", label: "Title" },
-	{ key: "slug", label: "Slug" },
 	{ key: "body", label: "Body", type: "textarea" },
 	{ key: "published", label: "Published", type: "checkbox", default: true },
 ];
@@ -84,85 +67,33 @@ const LINK_FIELDS: FieldDef[] = [
 ];
 
 const CONFIG_FIELDS: FieldDef[] = [
-	{ key: "welcomeMessage", label: "Welcome message", type: "textarea" },
-	{ key: "heroText", label: "Bio (README)", type: "textarea" },
+	{ key: "bio", label: "Bio", type: "textarea" },
 	{ key: "contactEmail", label: "Contact email" },
 	{ key: "generalTicketUrl", label: "General ticket URL" },
 	{ key: "footerNote", label: "Footer note" },
 ];
 
 const DESKTOP_WINDOW_WIDTHS: Partial<Record<SectionId, number>> = {
-	videos: 520,
-	spotifyAuth: 460,
-	tour: 460,
+	home: 620,
+	media: 520,
 	news: 380,
-	about: 360,
-	music: 420,
-	admin: 520,
 	guestlist: 380,
+	admin: 520,
+	spotifyAuth: 460,
 };
 
-// arranged so the default open windows form a tidy cascade
-// only these open by default: welcome, links (README/about) and tour dates
-const DEFAULT_OPEN: SectionId[] = ["welcome", "tour", "about"];
-
-// horizontal strip layout for the default windows: side by side on the same
-// height, evenly spaced inside the viewport. The available width is measured
-// (accounting for the desktop zoom) so the strip can never spill off-screen;
-// window widths shrink proportionally if needed.
-const ROW_ORIGIN = { x: 170, y: 40 };
-const ROW_GAP = 16;
-const ROW_MARGIN_RIGHT = 24;
-const MIN_WINDOW_WIDTH = 280;
-
-function useDesktopLayout() {
-	const [viewport, setViewport] = useState({ w: 1280, h: 800 });
-	const [scale, setScale] = useState(1);
-
-	useEffect(() => {
-		const measure = () => {
-			setViewport({ w: window.innerWidth, h: window.innerHeight });
-			const raw = getComputedStyle(document.documentElement).getPropertyValue("--desktop-scale");
-			const parsed = Number.parseFloat(raw);
-			setScale(Number.isFinite(parsed) && parsed > 0 ? parsed : 1);
-		};
-		measure();
-		window.addEventListener("resize", measure);
-		return () => window.removeEventListener("resize", measure);
-	}, []);
-
-	// CSS-pixel space inside the zoomed container = viewport / scale
-	const available = Math.max(400, viewport.w / scale - ROW_ORIGIN.x - ROW_MARGIN_RIGHT);
-
-	const widths = DEFAULT_OPEN.map((id) => DESKTOP_WINDOW_WIDTHS[id] ?? 400);
-	const naturalTotal = widths.reduce((a, b) => a + b, 0) + ROW_GAP * (widths.length - 1);
-	// shrink all windows proportionally when the natural total overflows
-	const shrink = naturalTotal > available ? (available - ROW_GAP * (widths.length - 1)) / widths.reduce((a, b) => a + b, 0) : 1;
-	const fitted = widths.map((w) => Math.max(MIN_WINDOW_WIDTH, Math.round(w * shrink)));
-
-	// distribute whatever space is left as even gaps between the windows
-	const total = fitted.reduce((a, b) => a + b, 0);
-	const gap = widths.length > 1 ? Math.max(8, (available - total) / (widths.length - 1)) : 0;
-
-	const positions: Record<string, Point> = {};
-	const windowWidths: Record<string, number> = {};
-	let x = ROW_ORIGIN.x;
-	DEFAULT_OPEN.forEach((id, i) => {
-		positions[id] = { x: Math.round(x), y: ROW_ORIGIN.y };
-		windowWidths[id] = fitted[i];
-		x += fitted[i] + gap;
-	});
-
-	return { positions, windowWidths, scale };
-}
+// a single window boots the desktop; everything else is opened on demand
+const DEFAULT_OPEN: SectionId[] = ["home"];
 
 // random desktop spot for manually opened windows, clamped to stay on screen
-function randomPosition(): Point {
-	const maxW = typeof window !== "undefined" ? window.innerWidth : 1280;
-	const maxH = typeof window !== "undefined" ? window.innerHeight : 800;
-	const x = Math.random() * Math.max(80, maxW - 480) + 60;
-	const y = Math.random() * Math.max(60, maxH - 420) + 30;
-	return { x: Math.round(x), y: Math.round(y) };
+const TASKBAR_H = 48;
+
+// area the top-left corner may land in so a window of the given size fits
+// entirely on screen above the taskbar
+function randomSpot(width: number, height: number): Point {
+	const maxX = Math.max(0, window.innerWidth - width);
+	const maxY = Math.max(0, window.innerHeight - TASKBAR_H - height);
+	return { x: Math.round(Math.random() * maxX), y: Math.round(Math.random() * maxY) };
 }
 
 function useIsMobile(): boolean {
@@ -189,6 +120,7 @@ function DraggableWindow({
 	focused,
 	z,
 	initial,
+	onPosCommit,
 	widthOverride,
 	mobile = false,
 }: {
@@ -203,12 +135,30 @@ function DraggableWindow({
 	focused: boolean;
 	z: number;
 	initial?: Point;
+	onPosCommit?: (pos: Point) => void;
 	widthOverride?: number;
 	mobile?: boolean;
 }) {
-	const [pos, setPos] = useState<Point>(initial ?? { x: 80, y: 60 });
+	const rootRef = useRef<HTMLDivElement | null>(null);
+	const [pos, setPos] = useState<Point>(initial ?? { x: 0, y: 0 });
+	const posRef = useRef<Point>(initial ?? { x: 0, y: 0 });
 	const [offset, setOffset] = useState<Point | null>(null);
+	const placedRef = useRef(Boolean(initial));
 	const meta = SECTIONS[section];
+
+	// measure the real extents after layout, then pick a random spot that
+	// keeps the whole window on screen
+	useLayoutEffect(() => {
+		if (mobile || placedRef.current) return;
+		placedRef.current = true;
+		const el = rootRef.current;
+		if (!el) return;
+		const rect = el.getBoundingClientRect();
+		const spot = randomSpot(rect.width, rect.height);
+		posRef.current = spot;
+		setPos(spot);
+		onPosCommit?.(spot);
+	}, [mobile, onPosCommit]);
 
 	const onTitlePointerDown = useCallback(
 		(e: React.PointerEvent<HTMLDivElement>) => {
@@ -225,12 +175,23 @@ function DraggableWindow({
 	const onTitlePointerMove = useCallback(
 		(e: React.PointerEvent<HTMLDivElement>) => {
 			if (!offset) return;
-			setPos({ x: e.clientX - offset.x, y: e.clientY - offset.y });
+			// clamp so the dragged window never leaves the screen
+			const el = rootRef.current;
+			const w = el ? el.offsetWidth : 0;
+			const h = el ? el.offsetHeight : 0;
+			const x = Math.min(Math.max(e.clientX - offset.x, 0), Math.max(0, window.innerWidth - w));
+			const y = Math.min(Math.max(e.clientY - offset.y, 0), Math.max(0, window.innerHeight - TASKBAR_H - h));
+			posRef.current = { x, y };
+			setPos({ x, y });
 		},
 		[offset],
 	);
 
-	const endDrag = useCallback(() => setOffset(null), []);
+	// persist on drag end so a later minimize/restore reopens in place
+	const endDrag = useCallback(() => {
+		setOffset(null);
+		onPosCommit?.(posRef.current);
+	}, [onPosCommit]);
 
 	if (minimized) return null;
 
@@ -238,15 +199,13 @@ function DraggableWindow({
 	// window controls are hidden so windows can only be switched, not closed
 	if (mobile) {
 		return (
-			<div className="xp-window relative flex w-full flex-col" onPointerDown={onFocus}>
-				<div className="xp-title cursor-default">
-					<span className="xp-title-icon mr-1">
-						{/* eslint-disable-next-line @next/next/no-img-element */}
-						<img src={meta.icon} alt="" className="h-4 w-4" />
-					</span>
+			<div className="border border-accent-border bg-chrome rounded-md shadow-[0_14px_40px_rgba(0,0,0,0.35)] relative flex w-full flex-col overflow-hidden rounded-t-xl" onPointerDown={onFocus}>
+				<div className="flex cursor-default items-center gap-1.5 bg-chrome-deep px-2.5 py-1.5 font-bold text-ink">
+					{/* eslint-disable-next-line @next/next/no-img-element */}
+					<img src={meta.icon} alt="" className="mr-1 h-4 w-4" />
 					<span className="flex-1 truncate">{meta.title}</span>
 				</div>
-				<div className="max-h-[65vh] min-h-0 overflow-auto p-3">
+				<div className="bg-surface m-1.5 max-h-[65vh] min-h-0 overflow-auto p-4 text-[12px] leading-relaxed rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)]">
 					<SectionContent section={section} onOpenSection={onOpenSection} />
 				</div>
 			</div>
@@ -255,6 +214,7 @@ function DraggableWindow({
 
 	return (
 		<div
+			ref={rootRef}
 			className="absolute flex flex-col"
 			style={{
 				left: maximized ? 0 : pos.x,
@@ -266,31 +226,36 @@ function DraggableWindow({
 			}}
 			onPointerDown={onFocus}
 		>
-			<div className={`xp-window flex h-full flex-col ${focused ? "focused" : ""}`}>
+			<div className={`bg-chrome border border-accent-border rounded-xl shadow-[0_14px_40px_rgba(0,0,0,0.35)] ${focused ? "shadow-[0_20px_50px_rgba(0,0,0,0.5)]" : ""} flex h-full flex-col overflow-hidden`}>
 				<div
-					className={`xp-title ${focused ? "" : "inactive"}`}
+					className={`flex cursor-default items-center gap-1.5 bg-chrome-deep px-2.5 py-1.5 select-none font-bold text-ink border-b border-b-accent-border/60`}
 					onPointerDown={onTitlePointerDown}
 					onPointerMove={onTitlePointerMove}
 					onPointerUp={endDrag}
 					onPointerCancel={endDrag}
 					onDoubleClick={onToggleMax}
 				>
-					<span className="xp-title-icon mr-1">
-						{/* eslint-disable-next-line @next/next/no-img-element */}
-						<img src={meta.icon} alt="" className="h-4 w-4" />
-					</span>
+					{/* eslint-disable-next-line @next/next/no-img-element */}
+					<img src={meta.icon} alt="" className="mr-1 h-4 w-4" />
+					<span className={`h-1.5 w-1.5 rounded-full ${focused ? "bg-accent" : "bg-accent-border/50"}`} />
 					<span className="flex-1 truncate">{meta.title}</span>
-					<button className="xp-title-btn min" aria-label="Minimize" onPointerDown={(e) => { e.preventDefault(); onMinimize(); }}>
-						<span className="-mt-1">_</span>
+					<button className="grid h-5 w-5 place-items-center rounded-md border border-accent-border/70 bg-accent-soft/70 text-ink hover:bg-accent-soft active:translate-y-px" aria-label="Minimize" onPointerDown={(e) => { e.preventDefault(); onMinimize(); }}>
+						<svg viewBox="0 0 10 10" className="h-2.5 w-2.5" aria-hidden="true"><path d="M1 7h8" stroke="currentColor" strokeWidth="1.5" /></svg>
 					</button>
-					<button className="xp-title-btn max" aria-label="Maximize" onPointerDown={(e) => { e.preventDefault(); onToggleMax(); }}>
-						<span className="text-[10px]">▢</span>
+					<button className="grid h-5 w-5 place-items-center rounded-md border border-accent-border/70 bg-accent-soft/70 text-ink hover:bg-accent-soft active:translate-y-px" aria-label={maximized ? "Restore" : "Maximize"} onPointerDown={(e) => { e.preventDefault(); onToggleMax(); }}>
+						<svg viewBox="0 0 10 10" className="h-2.5 w-2.5" aria-hidden="true">
+							{maximized ? (
+								<><path d="M3 3h5v5" stroke="currentColor" strokeWidth="1.2" fill="none" /><path d="M1.5 7V1.5H7" stroke="currentColor" strokeWidth="1.2" fill="none" /></>
+							) : (
+								<rect x="1.5" y="1.5" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.2" fill="none" />
+							)}
+						</svg>
 					</button>
-					<button className="xp-title-btn close ml-1" aria-label="Close" onPointerDown={(e) => { e.preventDefault(); onClose(); }}>
-						<span className="text-[14px]">✕</span>
+					<button className="grid h-5 w-5 place-items-center rounded-md border border-accent-border/70 bg-accent-soft/70 text-ink hover:bg-accent hover:border-accent hover:text-white active:translate-y-px" aria-label="Close" onPointerDown={(e) => { e.preventDefault(); onClose(); }}>
+						<svg viewBox="0 0 10 10" className="h-2.5 w-2.5" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
 					</button>
 				</div>
-				<div className="min-h-0 flex-1 overflow-auto p-3">
+				<div className="bg-surface m-1.5 mt-1.5 min-h-0 flex-1 overflow-auto p-3 text-[12px] leading-relaxed rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)]">
 					<SectionContent section={section} onOpenSection={onOpenSection} />
 				</div>
 			</div>
@@ -298,78 +263,160 @@ function DraggableWindow({
 	);
 }
 
-function TourWindow({ config }: { config: SiteConfig | null }) {
+function HomeWindow({
+	config,
+	onOpenSection,
+}: {
+	config: SiteConfig | null;
+	onOpenSection: (id: SectionId) => void;
+}) {
+	const [links, setLinks] = useState<LinkItem[]>([]);
 	const [dates, setDates] = useState<TourDate[] | null>(null);
-	const [error, setError] = useState("");
 
 	useEffect(() => {
+		api.getLinks()
+			.then((list) => setLinks(list.filter((l) => l.location === "window")))
+			.catch(() => setLinks([]));
 		api.getTourDates()
 			.then((list) => setDates([...list].sort((a, b) => a.sortOrder - b.sortOrder)))
-			.catch((err) => setError(err instanceof Error ? err.message : "Failed to load tour dates"));
+			.catch(() => setDates([]));
 	}, []);
 
-	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
-	if (!dates) return <p className="text-[12px]">Loading…</p>;
-	if (dates.length === 0) return <p className="text-[12px] opacity-70">No dates announced yet — check back soon.</p>;
+	const exploreLinks: { id: SectionId; label: string }[] = [
+		{ id: "media", label: "Play the music" },
+		{ id: "news", label: "Read the news" },
+		{ id: "guestlist", label: "See the guest list" },
+	];
+	const upcoming = (dates ?? []).slice(0, 4);
 
 	return (
 		<div className="flex h-full flex-col">
-			<div className="xp-toolbar -mx-3 -mt-3 mb-2">
-				<span className="xp-toolbar-btn font-bold">📅 Tour Dates</span>
-				<span className="ml-auto pr-1 text-[10px] opacity-60">Dupont — Denmark</span>
+			<div className="bg-accent-soft/70 border-b border-b-accent-border/40 px-3 py-2 text-ink">
+				<div className="flex items-baseline gap-2">
+					<div className="text-base font-bold italic">Dupont</div>
+					<div className="text-[10px] opacity-60">Denmark · folk-rock</div>
+				</div>
 			</div>
-			<div className="xp-inset min-h-0 flex-1 overflow-auto rounded-sm">
-				<table className="w-full border-collapse text-left">
-					<thead>
-						<tr>
-							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">Date</th>
-							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">City</th>
-							<th className="border border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 text-left font-normal">Venue</th>
-						</tr>
-					</thead>
-					<tbody>
-						{dates.map((d) => (
-							<tr key={d.id} className="hover:bg-[#cde5ff]">
-								<td className="px-2 py-1">{d.eventDate}</td>
-								<td className="px-2 py-1">{d.city}</td>
-								<td className="px-2 py-1">
-									{d.venue}
-									{d.notes ? <span className="ml-1 opacity-60">{d.notes}</span> : null}
-									{d.ticketUrl && (
+			<div className="mt-2 min-h-48 flex-1 overflow-auto">
+				<div className="rounded-lg border border-accent-border bg-surface p-3 leading-relaxed whitespace-pre-wrap">
+					{config?.bio || ""}
+				</div>
+				<div className="mt-2 rounded-lg border border-accent-border bg-surface shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)]">
+					<div className="border-b border-b-accent-border/60 bg-chrome px-2.5 py-1 text-[11px] font-bold">Upcoming shows</div>
+					<div className="p-2">
+						{dates === null ? (
+							<p className="text-[12px] opacity-60">Loading…</p>
+						) : upcoming.length === 0 ? (
+							<p className="text-[12px] opacity-70">No dates announced yet — check back soon.</p>
+						) : (
+							<div className="flex flex-col">
+								{upcoming.map((d) => (
+									<div key={d.id} className="flex items-baseline gap-2 rounded-md px-1 py-0.5 text-[12px] hover:bg-accent/10">
+										<span className="w-20 shrink-0 tabular-nums opacity-60">{d.eventDate}</span>
+										<span className="w-24 shrink-0 truncate font-bold" title={d.city}>{d.city}</span>
+										<span className="flex-1 truncate" title={d.venue}>{d.venue}</span>
 										<a
-											className="ml-2 text-[11px] text-[#0000cc] underline"
-											href={d.ticketUrl}
+											className="shrink-0 text-[11px] font-bold text-accent hover:text-accent-dark hover:underline"
+											href={d.ticketUrl || config?.generalTicketUrl || "#"}
 											target="_blank"
 											rel="noopener noreferrer"
 										>
 											Tickets →
 										</a>
-									)}
-								</td>
-							</tr>
-						))}
-					</tbody>
-				</table>
+									</div>
+								))}
+								{dates.length > upcoming.length && (
+									<p className="px-1 pt-1 text-[11px] opacity-60">+ {dates.length - upcoming.length} more dates announced</p>
+								)}
+							</div>
+						)}
+					</div>
+				</div>
 			</div>
-			<div className="xp-statusbar mt-2">
-				<span className="xp-status-cell">{dates.length} dates found</span>
-				{config?.generalTicketUrl && (
-					<a
-						className="xp-btn ml-auto px-3 py-0.5 no-underline"
-						href={config.generalTicketUrl}
-						target="_blank"
-						rel="noopener noreferrer"
-					>
-						Get Tickets →
-					</a>
+			<div className="mt-2 pt-2">
+				<div className="mb-1 text-[10px] font-bold uppercase opacity-50">Apps</div>
+				<div className="flex flex-col">
+					{exploreLinks.map((l) => (
+						<button
+							key={l.id}
+							className="flex items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[12px] hover:bg-accent/10"
+							onClick={() => onOpenSection(l.id)}
+						>
+							<span className="w-4 text-center">▸</span> {l.label}
+						</button>
+					))}
+				</div>
+				{links.length > 0 && (
+					<div className="mt-2 flex flex-wrap gap-1 pt-2">
+						{links.map((l) => (
+							<a key={l.id} className="rounded-full border border-accent-border bg-chrome px-2 py-0.5 text-[10px] no-underline shadow-[0_1px_2px_rgba(0,0,0,0.12)] hover:bg-accent-soft" href={l.url} target="_blank" rel="noopener noreferrer">
+								{l.icon && (
+									// eslint-disable-next-line @next/next/no-img-element
+									<img src={l.icon} alt="" className="mr-1 inline h-3.5 w-3.5" />
+								)}
+								{l.label}
+							</a>
+						))}
+					</div>
 				)}
 			</div>
-			{config?.contactEmail && (
-				<a className="mt-1.5 text-right text-[10px] text-[#0000cc] underline" href={`mailto:${config.contactEmail}`}>
-					Questions? {config.contactEmail}
-				</a>
-			)}
+			<div className="mt-2 flex items-center gap-2 pt-1.5">
+				{config?.contactEmail && (
+					<a className="text-[11px] text-accent underline hover:text-accent-dark" href={`mailto:${config.contactEmail}`}>
+						📧 {config.contactEmail}
+					</a>
+				)}
+				{config?.footerNote && (
+					<span className="ml-auto rounded-full border border-accent-border/60 bg-chrome/70 px-2 py-0.5 text-[11px] opacity-80">{config.footerNote}</span>
+				)}
+			</div>
 		</div>
+	);
+}
+
+function MediaPlayerWindow() {
+	const [tab, setTab] = useState<"music" | "videos">("music");
+
+	return (
+		<div className="flex h-full flex-col">
+			<div className="flex gap-1">
+				<button
+					className={`border border-accent-border rounded-md px-2 py-0.5 shadow-[0_1px_2px_rgba(0,0,0,0.12)] text-[11px] ${tab === "music" ? "bg-accent-soft font-bold" : "bg-chrome opacity-80 hover:opacity-100 hover:bg-accent-soft"}`}
+					onClick={() => setTab("music")}
+				>
+					Music
+				</button>
+				<button
+					className={`border border-accent-border rounded-md px-2 py-0.5 shadow-[0_1px_2px_rgba(0,0,0,0.12)] text-[11px] ${tab === "videos" ? "bg-accent-soft font-bold" : "bg-chrome opacity-80 hover:opacity-100 hover:bg-accent-soft"}`}
+					onClick={() => setTab("videos")}
+				>
+					Videos
+				</button>
+			</div>
+			<div className="min-h-0 flex-1 pt-2">
+				{tab === "music" ? <SpotifyPlayer /> : <VideosPane />}
+			</div>
+		</div>
+	);
+}
+function VideosPane() {
+	const [videos, setVideos] = useState<VideoItem[] | null>(null);
+	const [error, setError] = useState("");
+
+	useEffect(() => {
+		api.getVideos()
+			.then((list) => setVideos([...list].sort((a, b) => a.sortOrder - b.sortOrder)))
+			.catch((err) => setError(err instanceof Error ? err.message : "Failed to load videos"));
+	}, []);
+
+	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
+	if (!videos) return <p className="text-[12px] opacity-60">Loading…</p>;
+	if (videos.length === 0) return <p className="text-[12px] opacity-70">No videos yet.</p>;
+
+	return (
+		<VideoPlayer
+			videos={videos.map((v) => ({ id: v.youtubeId, title: v.title, subtitle: v.subtitle }))}
+		/>
 	);
 }
 
@@ -384,94 +431,24 @@ function NewsWindow() {
 	}, []);
 
 	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
-	if (!posts) return <p className="text-[12px]">Loading…</p>;
+	if (!posts) return <p className="text-[12px] opacity-60">Loading…</p>;
 	if (posts.length === 0) return <p className="text-[12px] opacity-70">No news yet.</p>;
 
 	return (
 		<div className="flex h-full flex-col">
-			<div className="xp-toolbar -mx-3 -mt-3 mb-2">
-				<span className="xp-toolbar-btn font-bold">📰 News</span>
-				<span className="ml-auto pr-1 text-[10px] opacity-60">{posts.length} posts</span>
-			</div>
-			<div className="xp-inset min-h-0 flex-1 overflow-auto rounded-sm p-2">
-				<div className="flex flex-col gap-3 font-mono text-[11px]">
+			<div className="min-h-0 flex-1 overflow-auto border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] p-3">
+				<div className="flex flex-col gap-3 text-[12px] leading-relaxed">
 					{posts.map((p) => (
 						<article key={p.id}>
-							<h3 className="font-bold">{p.title}</h3>
+							<h3 className="font-bold text-accent-dark">{p.title}</h3>
 							<div className="whitespace-pre-wrap">{p.body}</div>
 						</article>
 					))}
 				</div>
 			</div>
-			<div className="xp-statusbar mt-2">
-				<span className="xp-status-cell">Press & announcements</span>
+			<div className="mt-3 flex items-center gap-2 pt-2">
+				<span className="rounded-full border border-accent-border/60 bg-chrome/70 px-2 py-0.5 text-[11px] opacity-80">Press &amp; announcements</span>
 			</div>
-		</div>
-	);
-}
-
-function VideosWindow() {
-	const [videos, setVideos] = useState<VideoItem[] | null>(null);
-	const [error, setError] = useState("");
-
-	useEffect(() => {
-		api.getVideos()
-			.then((list) => setVideos([...list].sort((a, b) => a.sortOrder - b.sortOrder)))
-			.catch((err) => setError(err instanceof Error ? err.message : "Failed to load videos"));
-	}, []);
-
-	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
-	if (!videos) return <p className="text-[12px]">Loading…</p>;
-	if (videos.length === 0) return <p className="text-[12px] opacity-70">No videos yet.</p>;
-
-	return (
-		<VideoPlayer
-			videos={videos.map((v) => ({ id: v.youtubeId, title: v.title, subtitle: v.subtitle }))}
-		/>
-	);
-}
-
-function AboutWindow({ config }: { config: SiteConfig | null }) {
-	const [links, setLinks] = useState<LinkItem[]>([]);
-
-	useEffect(() => {
-		api.getLinks()
-			.then((list) => setLinks(list.filter((l) => l.location === "window")))
-			.catch(() => setLinks([]));
-	}, []);
-
-	return (
-		<div className="flex h-full flex-col">
-			<div className="min-h-48 flex-1 overflow-auto bg-white p-2 font-mono text-[11px] whitespace-pre-wrap">
-				{[
-					"README.TXT",
-					"",
-					config?.heroText || "",
-					"",
-					`Contact: ${config?.contactEmail || "—"}`,
-				]
-					.join("\n")
-					.trim()}
-			</div>
-			{links.length > 0 && (
-				<div className="mt-2 flex flex-wrap gap-1">
-					{links.map((l) => (
-						<a
-							key={l.id}
-							className="xp-btn text-center no-underline"
-							href={l.url}
-							target="_blank"
-							rel="noopener noreferrer"
-						>
-							{l.icon && (
-								// eslint-disable-next-line @next/next/no-img-element
-								<img src={l.icon} alt="" className="mr-1 inline h-3.5 w-3.5" />
-							)}
-							{l.label}
-						</a>
-					))}
-				</div>
-			)}
 		</div>
 	);
 }
@@ -501,43 +478,43 @@ function GuestlistWindow() {
 	}, []);
 
 	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
-	if (!guests) return <p className="text-[12px]">Loading…</p>;
+	if (!guests) return <p className="text-[12px] opacity-60">Loading…</p>;
 
 	return (
 		<div className="flex h-full flex-col text-[12px]">
 			{me && (
-				<div className="mb-2 rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
+				<div className="mb-2 border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] p-2 text-[11px]">
 					You&apos;re on the list, <span className="font-bold">{me.name}</span> — time {formatDuration(me.durationMs)}.
 				</div>
 			)}
-			<p className="mb-1 text-[11px] opacity-70">
+			<p className="mb-1.5 text-[11px] opacity-70">
 				Everyone who has beaten the hidden challenge. Fastest at the top.
 			</p>
-			<div className="xp-inset min-h-0 flex-1 overflow-auto rounded-sm bg-white">
+			<div className="min-h-0 flex-1 overflow-auto border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)]">
 				{guests.length === 0 ? (
 					<p className="p-2 opacity-60">The list is empty — nobody has made it yet.</p>
 				) : (
 					<table className="w-full border-collapse text-left">
 						<thead>
 							<tr>
-								<th className="border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 font-normal">#</th>
-								<th className="border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 font-normal">Name</th>
-								<th className="border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 font-normal">Time</th>
-								<th className="border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-1 font-normal">Added</th>
+								<th className="border-b border-b-accent-border bg-chrome px-2 py-1.5 text-[11px] font-bold">#</th>
+								<th className="border-b border-b-accent-border bg-chrome px-2 py-1.5 text-[11px] font-bold">Name</th>
+								<th className="border-b border-b-accent-border bg-chrome px-2 py-1.5 text-[11px] font-bold">Time</th>
+								<th className="border-b border-b-accent-border bg-chrome px-2 py-1.5 text-[11px] font-bold">Added</th>
 							</tr>
 						</thead>
 						<tbody>
 							{guests.map((g, i) => {
 								const isMe = me?.name === g.name && me.durationMs === g.durationMs;
 								return (
-									<tr key={g.id} className="hover:bg-[#cde5ff]">
-										<td className="px-2 py-1 opacity-60">{i + 1}</td>
-										<td className="px-2 py-1">
+									<tr key={g.id} className={isMe ? "bg-accent-soft font-bold" : "hover:bg-accent/10 rounded-md"}>
+										<td className="px-2 py-1.5 opacity-60">{i + 1}</td>
+										<td className="px-2 py-1.5">
 											{g.name}
-											{isMe && <span className="ml-1 text-[10px] font-bold text-[#316ac5]">(you)</span>}
+											{isMe && <span className="ml-1 text-[10px] font-bold">(you)</span>}
 										</td>
-										<td className="px-2 py-1 tabular-nums">{formatDuration(g.durationMs)}</td>
-										<td className="px-2 py-1 opacity-60">
+										<td className="px-2 py-1.5 tabular-nums">{formatDuration(g.durationMs)}</td>
+										<td className="px-2 py-1.5 opacity-60">
 											{new Date(g.createdAt).toLocaleDateString([], { day: "numeric", month: "short" })}
 										</td>
 									</tr>
@@ -554,7 +531,7 @@ function GuestlistWindow() {
 function AdminWindow() {
 	const { user, loading } = useAuth();
 
-	if (loading) return <p className="text-[12px]">Loading…</p>;
+	if (loading) return <p className="text-[12px] opacity-60">Loading…</p>;
 	if (!user) {
 		return (
 			<div className="flex h-full flex-col">
@@ -690,13 +667,13 @@ function SpotifyAuthFrame() {
 
 	return (
 		<div className="flex h-full flex-col">
-			<div className="flex items-center gap-2 border-b border-[#d5d2c8] bg-[#ece9d8] px-2 py-0.5 text-[11px]">
-				<span className="rounded-sm border border-[#7f9db9] bg-white px-2 py-0.5">Spotify</span>
-				<button className="xp-btn px-2 py-0.5" onClick={closeAll}>
+			<div className="flex items-center gap-2 border-b border-b-accent-border/60 bg-accent-soft/60 px-2 py-1 text-[11px]">
+				<span className="rounded-full border border-accent-border/60 bg-surface px-2 py-0.5 font-bold text-accent-dark">Spotify</span>
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-2 py-0.5 hover:bg-accent-soft active:translate-y-px" onClick={closeAll}>
 					Close
 				</button>
 			</div>
-			<div className="flex flex-1 flex-col items-center justify-center gap-3 bg-white p-4 text-center">
+			<div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
 				{/* eslint-disable-next-line @next/next/no-img-element */}
 				<img src="/icons/48/music.png" alt="" className="h-12 w-12" />
 				<div className="text-[13px] font-bold">Connect your Spotify account</div>
@@ -704,7 +681,7 @@ function SpotifyAuthFrame() {
 					Full-track playback uses your own Spotify Premium account. A Spotify login
 					window will open — this site never sees your password.
 				</p>
-				<button className="xp-btn px-4 py-1 text-[12px]" onClick={openLogin}>
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-4 py-1 text-[12px] font-bold hover:bg-accent-soft active:translate-y-px" onClick={openLogin}>
 					{waiting ? "Waiting for login…" : "Open Spotify login"}
 				</button>
 			</div>
@@ -728,16 +705,10 @@ function SectionContent({
 	}, []);
 
 	switch (section) {
-		case "music":
-			return <SpotifyPlayer />;
-		case "tour":
-			return <TourWindow config={config} />;
+		case "media":
+			return <MediaPlayerWindow />;
 		case "news":
 			return <NewsWindow />;
-		case "videos":
-			return <VideosWindow />;
-		case "about":
-			return <AboutWindow config={config} />;
 		case "guestlist":
 			return <GuestlistWindow />;
 		case "admin":
@@ -745,72 +716,9 @@ function SectionContent({
 		case "spotifyAuth":
 			return <SpotifyAuthFrame />;
 		default:
-			return <WelcomeWindow config={config} onOpenSection={onOpenSection} />;
+			return <HomeWindow config={config} onOpenSection={onOpenSection} />;
 	}
 }
-
-// XP "Welcome to Windows"-style landing: blue banner, bio, big task links
-function WelcomeWindow({
-	config,
-	onOpenSection,
-}: {
-	config: SiteConfig | null;
-	onOpenSection: (id: SectionId) => void;
-}) {
-	const [links, setLinks] = useState<LinkItem[]>([]);
-
-	useEffect(() => {
-		api.getLinks()
-			.then((list) => setLinks(list.filter((l) => l.location === "window" && l.category === "social")))
-			.catch(() => setLinks([]));
-	}, []);
-
-	return (
-		<div className="flex h-full flex-col">
-			<div className="rounded-sm bg-linear-to-r from-[#0058e6] via-[#3f8cf3] to-[#0058e6] p-3 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
-				<div className="flex items-center gap-2">
-					{/* eslint-disable-next-line @next/next/no-img-element */}
-					<img src="/icons/48/welcome.png" alt="" className="h-9 w-9 drop-shadow" />
-					<div className="text-lg font-bold italic" style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.6)" }}>
-						Dupont
-					</div>
-					<div className="ml-auto text-[10px] opacity-80">Denmark</div>
-				</div>
-			</div>
-			<div className="xp-inset mt-2 flex-1 overflow-auto rounded-sm p-2 text-[11px] leading-snug">
-				{config?.welcomeMessage || "Welcome."}
-			</div>
-			<div className="mt-2 border-t border-[#d5d2c8] pt-2">
-				<div className="mb-1 text-[10px] font-bold uppercase opacity-50">Explore</div>
-				<div className="flex flex-col">
-					<button className="xp-welcome-link text-left text-[12px]" onClick={() => onOpenSection("music")}>
-						<span className="w-4 text-center">▸</span> Play the music
-					</button>
-					<button className="xp-welcome-link text-left text-[12px]" onClick={() => onOpenSection("tour")}>
-						<span className="w-4 text-center">▸</span> See tour dates
-					</button>
-					<button className="xp-welcome-link text-left text-[12px]" onClick={() => onOpenSection("videos")}>
-						<span className="w-4 text-center">▸</span> Watch the videos
-					</button>
-					<button className="xp-welcome-link text-left text-[12px]" onClick={() => onOpenSection("news")}>
-						<span className="w-4 text-center">▸</span> Read the news
-					</button>
-				</div>
-				{links.length > 0 && (
-					<div className="mt-2 flex flex-wrap gap-1 border-t border-[#d5d2c8] pt-2">
-						{links.map((l) => (
-							<a key={l.id} className="xp-btn text-[10px] no-underline" href={l.url} target="_blank" rel="noopener noreferrer">
-								{l.label}
-							</a>
-						))}
-					</div>
-				)}
-			</div>
-			{config?.footerNote && <div className="xp-statusbar mt-2 -mx-3 -mb-3">{config.footerNote}</div>}
-		</div>
-	);
-}
-
 export default function Home() {
 	const isMobile = useIsMobile();
 	const [startOpen, setStartOpen] = useState(false);
@@ -818,13 +726,30 @@ export default function Home() {
 	const [bootCode, setBootCode] = useState<string | null>(null);
 	// taskbar/stack order: append-only, ordered by time opened
 	const [wins, setWins] = useState<WinState[]>(
-		DEFAULT_OPEN.map((id, slot) => ({ id, minimized: false, maximized: false, slot })),
+		DEFAULT_OPEN.map((id) => ({ id, minimized: false, maximized: false })),
 	);
 	// paint order, separate from the taskbar stack
 	const [zOrder, setZOrder] = useState<SectionId[]>([...DEFAULT_OPEN]);
-	const nextSlotRef = useRef(DEFAULT_OPEN.length);
 	const [clock, setClock] = useState("");
 	const [startLinks, setStartLinks] = useState<LinkItem[]>([]);
+
+	const bringToFront = useCallback((id: SectionId) => {
+		setZOrder((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((w) => w !== id), id]));
+	}, []);
+
+	const openSection = useCallback((id: SectionId) => {
+		setWins((prev) =>
+			prev.some((w) => w.id === id)
+				? prev.map((w) => (w.id === id ? { ...w, minimized: false } : w))
+				: [...prev, { id, minimized: false, maximized: false }],
+		);
+		bringToFront(id);
+		setStartOpen(false);
+	}, [bringToFront]);
+
+	const commitPos = useCallback((id: SectionId, pos: Point) => {
+		setWins((prev) => prev.map((w) => (w.id === id ? { ...w, pos } : w)));
+	}, []);
 
 	useEffect(() => {
 		const tick = () =>
@@ -851,27 +776,6 @@ export default function Home() {
 			.catch(() => { });
 	}, []);
 
-	const openSection = (id: SectionId) => {
-		setWins((prev) =>
-			prev.some((w) => w.id === id)
-				? prev.map((w) => (w.id === id ? { ...w, minimized: false } : w))
-				: [
-					...prev,
-					{
-						id,
-						minimized: false,
-						maximized: false,
-						slot: nextSlotRef.current++,
-						// only windows opened after load get a random spot;
-						// defaults keep their row slot
-						manualPos: randomPosition(),
-					},
-				],
-		);
-		bringToFront(id);
-		setStartOpen(false);
-	};
-
 	// the Spotify player asks the desktop to open the auth window
 	// (instead of a browser popup)
 	useEffect(() => {
@@ -885,11 +789,7 @@ export default function Home() {
 			window.removeEventListener(SPOTIFY_AUTH_OPEN_EVENT, onAuthOpen);
 			window.removeEventListener(SPOTIFY_AUTH_CLOSE_EVENT, onAuthClose);
 		};
-	}, []);
-
-	const bringToFront = useCallback((id: SectionId) => {
-		setZOrder((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((w) => w !== id), id]));
-	}, []);
+	}, [openSection]);
 
 	// taskbar keeps its open-order; clicking a non-minimized taskbar button
 	// minimizes it, anything else focuses (and un-minimizes) it
@@ -919,7 +819,6 @@ export default function Home() {
 	};
 
 	const desktopLinks = startLinks.filter((l) => l.location === "desktop");
-	const layout = useDesktopLayout();
 
 	if (powerState === "booting") {
 		return (
@@ -933,7 +832,23 @@ export default function Home() {
 	}
 
 	if (powerState === "guestlist") {
-		return <GuestlistDesktop code={bootCode ?? ""} />;
+		return (
+			<div className="relative h-full w-full overflow-hidden" style={{ zoom: "var(--desktop-scale)" }}>
+				<div className="absolute top-2 left-2">
+					<DesktopIcon icon="/icons/48/guestlist.png" label="Guest List" onOpen={() => {}} />
+				</div>
+				<div className="absolute top-16 left-1/2 w-105 -translate-x-1/2 rounded-xl border border-accent-border bg-chrome shadow-[0_24px_60px_rgba(0,0,0,0.4)] overflow-hidden">
+					<div className="flex items-center gap-1.5 border-b border-b-accent-border/60 bg-chrome-deep px-2.5 py-1.5 font-bold text-ink">
+						{/* eslint-disable-next-line @next/next/no-img-element */}
+						<img src="/icons/16/guestlist.png" alt="" className="mr-1 h-4 w-4" />
+						<span className="flex-1 truncate">Guest List</span>
+					</div>
+					<div className="bg-surface m-1.5 p-3 text-[12px] leading-relaxed rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)]">
+						<GuestlistPanel code={bootCode ?? ""} />
+					</div>
+				</div>
+			</div>
+		);
 	}
 
 	return (
@@ -942,12 +857,10 @@ export default function Home() {
 			style={{ zoom: "var(--desktop-scale)" }}
 		>
 			<div className="absolute top-2 left-2 flex flex-col gap-1">
-				<DesktopIcon icon="/icons/48/readme.png" label="README.TXT" onOpen={() => openSection("about")} />
-				<DesktopIcon icon="/icons/48/music.png" label="Music" onOpen={() => openSection("music")} />
-				<DesktopIcon icon="/icons/48/videos.png" label="Videos" onOpen={() => openSection("videos")} />
-				<DesktopIcon icon="/icons/48/tour.png" label="Tour Dates" onOpen={() => openSection("tour")} />
-				<DesktopIcon icon="/icons/48/guestlist.png" label="Guest List" onOpen={() => openSection("guestlist")} />
+				<DesktopIcon icon="/icons/48/welcome.png" label="Home" onOpen={() => openSection("home")} />
+				<DesktopIcon icon="/icons/48/music.png" label="Media Player" onOpen={() => openSection("media")} />
 				<DesktopIcon icon="/icons/48/readme.png" label="News" onOpen={() => openSection("news")} />
+				<DesktopIcon icon="/icons/48/guestlist.png" label="Guest List" onOpen={() => openSection("guestlist")} />
 				{desktopLinks.map((l) => (
 					<DesktopIcon key={l.id} icon={l.icon || "/icons/48/readme.png"} label={l.label} href={l.url} />
 				))}
@@ -982,8 +895,8 @@ export default function Home() {
 						section={w.id}
 						minimized={false}
 						maximized={w.maximized}
-						initial={w.manualPos ?? layout.positions[w.id] ?? { x: 170, y: 40 }}
-						widthOverride={layout.windowWidths[w.id]}
+						initial={w.pos}
+						onPosCommit={(pos) => commitPos(w.id, pos)}
 						z={zOrder.indexOf(w.id) + 1}
 						focused={zOrder[zOrder.length - 1] === w.id}
 						onClose={() => closeSection(w.id)}
@@ -995,65 +908,57 @@ export default function Home() {
 				))
 			)}
 
-			<div className="absolute bottom-0 left-0 right-0">
-				<div className="xp-taskbar flex items-center gap-1.5 pr-1">
-					<button className="xp-start-btn" onClick={() => setStartOpen((v) => !v)}>
-						<span>🪟</span> start
+			<div className="absolute bottom-2 left-1/2 -translate-x-1/2 max-w-[96%]">
+				<div className="flex items-center gap-1.5 rounded-full border border-accent-border bg-chrome/85 px-2 py-1 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+					<button
+						className={`grid h-8 w-8 place-items-center rounded-full border border-accent-border text-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.12)] ${startOpen ? "bg-accent text-white" : "bg-chrome hover:bg-accent-soft active:translate-y-px"}`}
+						onClick={() => setStartOpen((v) => !v)}
+						aria-label="Start"
+					>
+						🪟
 					</button>
-					<div className="flex flex-1 items-center gap-1">
+					<div className="h-5 w-px bg-accent-border/60" />
+					<div className="flex items-center gap-1">
 						{wins.map((w) => {
 							const isActive = !w.minimized && zOrder[zOrder.length - 1] === w.id;
 							return (
 								<button
 									key={w.id}
-									className={`xp-task-btn ${isActive ? "active" : ""} ${w.minimized ? "opacity-70" : ""}`}
+									className={`flex items-center gap-1 rounded-full border px-2.5 py-1 transition-colors max-w-42 truncate text-[11px] ${isActive ? "border-accent-border bg-accent-soft font-bold text-ink" : "border-transparent bg-white/40 hover:bg-accent-soft"} ${w.minimized ? "opacity-60" : ""}`}
 									onClick={() => taskbarClick(w.id, w.minimized)}
 								>
 									{/* eslint-disable-next-line @next/next/no-img-element */}
-									<img src={SECTIONS[w.id].icon} alt="" className="mr-1 inline h-3.5 w-3.5" />
+									<img src={SECTIONS[w.id].icon} alt="" className="h-3.5 w-3.5" />
 									{SECTIONS[w.id].title.split(" - ")[0]}
 								</button>
 							);
 						})}
 					</div>
 					<TaskbarAuth onOpenAdmin={() => openSection("admin")} />
-					<ThemePicker />
-					<div className="xp-tray flex h-full items-center gap-2 text-[11px]">
-						<span title="Volume">🔊</span>
-						<span title="Network">📶</span>
-						<span className="xp-tray-clock tabular-nums">{clock}</span>
+					<div className="rounded-full bg-accent-soft/60 px-3 py-1 text-[11px]">
+						<span className="tabular-nums">{clock}</span>
 					</div>
 				</div>
 			</div>
 
 			{startOpen && (
-				<div className="absolute bottom-8.5 left-0 flex w-96 overflow-hidden rounded-r-lg border border-[#0831d9] shadow-[3px_-3px_10px_rgba(0,0,0,0.45)]">
-					<div className="flex w-9 items-end justify-center bg-linear-to-t from-[#1e50c8] via-[#245edb] to-[#3f8cf3] pb-3">
-						<span
-							className="text-sm font-bold italic text-white"
-							style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
-						>
-							Dupontdoku
-						</span>
+				<div className="absolute bottom-14 left-1/2 w-96 -translate-x-1/2 rounded-xl border border-accent-border bg-chrome shadow-[0_24px_60px_rgba(0,0,0,0.4)] overflow-hidden">
+					<div className="flex items-center gap-2 bg-accent px-3 py-2 text-white">
+						{/* eslint-disable-next-line @next/next/no-img-element */}
+						<img src="/icons/16/welcome.png" alt="" className="h-5 w-5" />
+						<span className="text-sm font-bold">Dupontdoku</span>
 					</div>
-					<div className="flex-1 bg-[#ece9d8]">
-						<div className="p-1">
+					<div className="bg-surface">
+						<div className="p-1.5">
 							<button
-								className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-bold hover:bg-[#316ac5] hover:text-white"
-								onClick={() => openSection("welcome")}
-							>
-								{/* eslint-disable-next-line @next/next/no-img-element */}
-								<img src="/icons/16/welcome.png" alt="" className="h-5 w-5" /> Welcome
-							</button>
-							<button
-								className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
+								className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/10"
 								onClick={() => openSection("admin")}
 							>
 								{/* eslint-disable-next-line @next/next/no-img-element */}
 								<img src="/icons/16/guestlist.png" alt="" className="h-5 w-5" /> Content Manager
 							</button>
 						</div>
-						<div className="mx-1 border-t border-[#d5d2c8]" />
+						<div className="mx-3 my-1 border-t border-t-accent-border/40" />
 						<div className="p-1">
 							{(() => {
 								// group the start links by category with headings
@@ -1075,7 +980,7 @@ export default function Home() {
 										{items.map((l) => (
 											<a
 												key={l.id}
-												className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#316ac5] hover:text-white"
+												className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/10"
 												href={l.url}
 												target="_blank"
 												rel="noopener noreferrer"
@@ -1093,10 +998,10 @@ export default function Home() {
 								));
 							})()}
 						</div>
-						<div className="mx-1 border-t border-[#d5d2c8]" />
-						<div className="flex items-center justify-between bg-linear-to-r from-[#e6e3d3] to-[#ece9d8] p-1.5">
+						<div className="mx-3 my-1 border-t border-t-accent-border/40" />
+						<div className="flex items-center justify-between p-1.5">
 							<button
-								className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-[#316ac5] hover:text-white"
+								className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-accent/10"
 								onClick={() => {
 									setWins((prev) => prev.map((w) => ({ ...w, minimized: true })));
 									setStartOpen(false);
@@ -1105,7 +1010,7 @@ export default function Home() {
 								<span className="text-lg">🔑</span> Log Off
 							</button>
 							<button
-								className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-[#316ac5] hover:text-white"
+								className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-accent/10"
 								onClick={() => {
 									setWins([]);
 									setStartOpen(false);
@@ -1137,26 +1042,19 @@ function DesktopIcon({
 	const content = (
 		<>
 			{/* eslint-disable-next-line @next/next/no-img-element */}
-			<img src={icon} alt="" className="h-9 w-9 drop-shadow-[1px_1px_2px_rgba(0,0,0,0.6)]" />
-			<span
-				className="icon-label rounded px-1 text-[11px] leading-tight text-white"
-				style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.9)" }}
-			>
-				{label}
-			</span>
+			<img src={icon} alt="" className="h-9 w-9" />
+			<span className="border border-transparent px-1 text-[11px] leading-tight text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]">{label}</span>
 		</>
 	);
-	const cls =
-		"flex w-20 flex-col items-center gap-1 rounded p-2 text-center focus:outline-none cursor-default";
 	if (href) {
 		return (
-			<a className={`${cls} xp-desktop-icon`} href={href} target="_blank" rel="noopener noreferrer">
+			<a className="flex w-20 flex-col items-center gap-1 border border-transparent bg-transparent p-2 text-center focus:outline-none cursor-default hover:bg-white/15 rounded-lg backdrop-blur-[2px]" href={href} target="_blank" rel="noopener noreferrer">
 				{content}
 			</a>
 		);
 	}
 	return (
-		<button className={`${cls} xp-desktop-icon`} onClick={onOpen}>
+		<button className="flex w-20 flex-col items-center gap-1 border border-transparent bg-transparent p-2 text-center focus:outline-none cursor-default hover:bg-white/15 rounded-lg backdrop-blur-[2px]" onClick={onOpen}>
 			{content}
 		</button>
 	);
@@ -1166,7 +1064,7 @@ function TaskbarAuth({ onOpenAdmin }: { onOpenAdmin: () => void }) {
 	const { user } = useAuth();
 	return (
 		<button
-			className="xp-task-btn"
+			className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-2 py-0.5 text-[11px] opacity-60"
 			onClick={onOpenAdmin}
 			title={user ? `Logged in as ${user.name}` : "Not logged in"}
 		>

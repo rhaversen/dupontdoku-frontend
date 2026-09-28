@@ -169,16 +169,16 @@ export function VideoPlayer({ videos }: { videos: Video[] }) {
 
 	return (
 		<div>
-			<div className="xp-inset relative aspect-video overflow-hidden rounded-sm bg-black p-0">
+			<div className="relative aspect-video overflow-hidden rounded-lg border border-accent-border bg-black shadow-[0_1px_3px_rgba(0,0,0,0.15)]">
 				<div ref={containerRef} className="h-full w-full" />
 				{(!ready || !playing) && (
 					<button
-						className="absolute inset-0 flex items-center justify-center bg-black/30 transition-colors hover:bg-black/10"
+						className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/10"
 						onClick={togglePlay}
 						aria-label={playing ? "Pause" : "Play"}
 					>
 						<span
-							className={`flex h-14 w-14 items-center justify-center rounded-full border-2 border-white/80 bg-black/50 text-2xl text-white transition-transform ${ready ? "scale-100" : "scale-90 opacity-60"}`}
+							className={`flex h-14 w-14 items-center justify-center rounded-full border border-white/60 bg-black/60 text-2xl text-white backdrop-blur-sm ${ready ? "scale-100" : "scale-90 opacity-60"}`}
 						>
 							{playing ? "⏸" : "▶"}
 						</span>
@@ -186,20 +186,20 @@ export function VideoPlayer({ videos }: { videos: Video[] }) {
 				)}
 			</div>
 
-			<div className="mt-2 rounded bg-[#e6e3d3] p-1.5 shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
+			<div className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] mt-2 p-2">
 				<div className="flex items-center gap-2">
-					<button className="xp-btn px-3 text-[12px]" onClick={togglePlay}>
+					<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-3 text-[12px] font-bold hover:bg-accent-soft active:translate-y-px" onClick={togglePlay}>
 						{playing ? "⏸" : "▶"}
 					</button>
 					<button
-						className="xp-btn px-3 text-[12px]"
+					className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-3 text-[12px] hover:bg-accent-soft active:translate-y-px disabled:opacity-60"
 						onClick={() => seekRatio(Math.max(0, time - 10))}
 						aria-label="Back 10 seconds"
 					>
 						⏪
 					</button>
 					<button
-						className="xp-btn px-3 text-[12px]"
+					className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-3 text-[12px] hover:bg-accent-soft active:translate-y-px disabled:opacity-60"
 						onClick={() => seekRatio(Math.min(1, (time + 10) / (duration || 1)))}
 						aria-label="Forward 10 seconds"
 					>
@@ -215,12 +215,12 @@ export function VideoPlayer({ videos }: { videos: Video[] }) {
 						step={0.001}
 						value={progress}
 						onChange={(e) => seekRatio(Number(e.target.value))}
-						className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white accent-[#3772d6]"
+						className="h-1.5 flex-1 cursor-pointer appearance-none border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] accent-accent"
 						aria-label="Seek"
 					/>
 				</div>
-				<div className="mt-1.5 truncate text-[11px]">
-					<span className="font-bold">{video.title}</span>
+				<div className="mt-1.5 truncate text-[12px]">
+					<span className="font-bold text-accent-dark">{video.title}</span>
 					<span className="opacity-60"> — {video.subtitle}</span>
 				</div>
 			</div>
@@ -229,15 +229,11 @@ export function VideoPlayer({ videos }: { videos: Video[] }) {
 				{videos.map((v, i) => (
 					<button
 						key={v.id}
-						className={`flex items-center gap-2 rounded px-2 py-1 text-left text-[11px] ${
-							i === current
-								? "bg-[#316ac5] text-white"
-								: "hover:bg-[#316ac5] hover:text-white"
-						}`}
+						className={`border border-transparent px-2 py-1 text-left flex items-center gap-2 text-[12px] hover:bg-accent/10 rounded-md ${i === current ? "bg-accent-soft font-bold" : ""}`}
 						onClick={() => select(i)}
 					>
-						<span className="opacity-70">{i === current && playing ? "▶" : "🎵"}</span>
-						<span className="flex-1 truncate">{v.title}</span>
+						<span className={`w-4 text-center ${i === current ? "text-accent" : "opacity-70"}`}>{i === current && playing ? "⏸" : "▶"}</span>
+						<span className={`flex-1 truncate ${i === current ? "font-bold" : ""}`}>{v.title}</span>
 						<span className={`text-[10px] ${i === current ? "" : "opacity-60"}`}>{v.subtitle}</span>
 					</button>
 				))}

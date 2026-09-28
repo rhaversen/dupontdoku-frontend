@@ -81,7 +81,7 @@ export function GuestlistPanel({ code, onDone }: { code?: string; onDone?: () =>
 	if (me || done) {
 		return (
 			<div className="flex h-full flex-col text-[12px]">
-				<div className="mb-2 rounded bg-[#e6e3d3] p-1.5 shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
+				<div className="border border-accent-border bg-accent-soft/60 rounded-md mb-2 p-1.5">
 					<p className="font-bold">You&apos;re on the list — see you at the show.</p>
 					{me && <p className="text-[11px]">Challenge completed in {formatDuration(me.durationMs)}.</p>}
 				</div>
@@ -99,7 +99,7 @@ export function GuestlistPanel({ code, onDone }: { code?: string; onDone?: () =>
 							<p className="mb-2">
 								Your boot completion code: <span className="font-mono font-bold">{code}</span>
 							</p>
-							<button className="xp-btn px-4" disabled={busy} onClick={() => void redeem()}>
+							<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] font-bold px-4 hover:bg-accent-soft active:translate-y-px disabled:opacity-60" disabled={busy} onClick={() => void redeem()}>
 								{busy ? "…" : "Claim guest spot"}
 							</button>
 						</>
@@ -109,9 +109,9 @@ export function GuestlistPanel({ code, onDone }: { code?: string; onDone?: () =>
 				</>
 			) : (
 				<form className="flex flex-col gap-2" onSubmit={(e) => void confirm(e)}>
-					<input name="name" required placeholder="Your name" className="xp-inset rounded-sm px-1 py-0.5" />
-					<input name="email" required type="email" placeholder="Your email" className="xp-inset rounded-sm px-1 py-0.5" />
-					<button type="submit" className="xp-btn px-4" disabled={busy}>
+					<input name="name" required placeholder="Your name" className="rounded-md border border-accent-border bg-surface shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] px-1.5 py-0.5" />
+					<input name="email" required type="email" placeholder="Your email" className="rounded-md border border-accent-border bg-surface shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] px-1.5 py-0.5" />
+					<button type="submit" className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] font-bold px-4 hover:bg-accent-soft active:translate-y-px disabled:opacity-60" disabled={busy}>
 						{busy ? "…" : "Add me to the guest list"}
 					</button>
 				</form>
@@ -131,8 +131,8 @@ function GuestTable({ guests }: { guests: Guest[] | null }) {
 				<tbody>
 					{guests.map((g) => (
 						<tr key={g.id}>
-							<td className="border border-[#d5d2c8] px-2 py-0.5">{g.name}</td>
-							<td className="border border-[#d5d2c8] px-2 py-0.5 opacity-70">
+								<td className="border-b border-b-accent-border/40 px-2 py-1">{g.name}</td>
+								<td className="border-b border-b-accent-border/40 px-2 py-1 opacity-70">
 								completed in {formatDuration(g.durationMs)}
 							</td>
 						</tr>

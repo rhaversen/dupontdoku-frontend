@@ -13,6 +13,8 @@ export type FieldDef = {
 
 type Item = Record<string, unknown> & { id: string };
 
+const inputCls = "flex-1 rounded-md border border-accent-border bg-surface shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] px-1.5 py-0.5";
+
 export function CrudEditor({
 	title,
 	fields,
@@ -41,8 +43,20 @@ export function CrudEditor({
 	}, [fetchItems]);
 
 	useEffect(() => {
-		void load();
-	}, [load]);
+		// setState fires from the async fetch callback, not synchronously in the effect body
+		let cancelled = false;
+		void (async () => {
+			try {
+				const data = await fetchItems();
+				if (!cancelled) setItems(data);
+			} catch (err) {
+				if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [fetchItems]);
 
 	const remove = async (id: string) => {
 		setError("");
@@ -58,26 +72,26 @@ export function CrudEditor({
 		<div className="flex h-full flex-col text-[12px]">
 			<div className="mb-2 flex items-center justify-between">
 				<span className="font-bold">{title}</span>
-				<button className="xp-btn px-3 py-0.5" onClick={() => setEditing("new")}>
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-3 py-0.5 font-bold hover:bg-accent-soft active:translate-y-px disabled:opacity-60" onClick={() => setEditing("new")}>
 					New
 				</button>
 			</div>
 			{error && <p className="mb-1 text-red-700">{error}</p>}
-			<div className="xp-inset min-h-0 flex-1 overflow-auto rounded-sm bg-white p-1">
+			<div className="min-h-0 flex-1 overflow-auto border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] p-1">
 				{items === null ? (
 					<p className="p-2">Loading…</p>
 				) : items.length === 0 ? (
 					<p className="p-2 opacity-60">No items yet.</p>
 				) : (
 					items.map((item) => (
-						<div key={item.id} className="flex items-center gap-2 border-b border-[#eee] px-1 py-0.5">
+						<div key={item.id} className="flex items-center gap-2 px-1 py-0.5">
 							<span className="flex-1 truncate">
 								{String(item[fields[0].key] ?? item.id)}
 							</span>
-							<button className="xp-btn px-2 py-0" onClick={() => setEditing(item)}>
+							<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-2 py-0 hover:bg-accent-soft" onClick={() => setEditing(item)}>
 								Edit
 							</button>
-							<button className="xp-btn px-2 py-0" onClick={() => void remove(item.id)}>
+							<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-2 py-0 hover:bg-accent-soft" onClick={() => void remove(item.id)}>
 								Del
 							</button>
 						</div>
@@ -144,7 +158,7 @@ function ItemForm({
 	};
 
 	return (
-		<div className="xp-inset mt-2 rounded-sm bg-[#ece9d8] p-2">
+		<div className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] mt-2 p-2">
 			{fields.map((f) => (
 				<label key={f.key} className="mb-1 flex items-start justify-between gap-2">
 					<span className="pt-0.5">{f.label}:</span>
@@ -153,7 +167,7 @@ function ItemForm({
 							rows={3}
 							value={String(values[f.key] ?? "")}
 							onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-							className="xp-inset flex-1 rounded-sm px-1 py-0.5"
+							className={inputCls}
 						/>
 					) : f.type === "checkbox" ? (
 						<input
@@ -165,7 +179,7 @@ function ItemForm({
 						<select
 							value={String(values[f.key] ?? "")}
 							onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-							className="xp-inset flex-1 rounded-sm px-1 py-0.5"
+							className={inputCls}
 						>
 							{f.options?.map((o) => (
 								<option key={o}>{o}</option>
@@ -181,17 +195,17 @@ function ItemForm({
 									[f.key]: f.type === "number" ? Number(e.target.value) : e.target.value,
 								}))
 							}
-							className="xp-inset flex-1 rounded-sm px-1 py-0.5"
+							className={inputCls}
 						/>
 					)}
 				</label>
 			))}
 			{error && <p className="text-red-700">{error}</p>}
 			<div className="mt-1 flex justify-end gap-1">
-				<button className="xp-btn px-3" onClick={onCancel}>
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-3 hover:bg-accent-soft active:translate-y-px" onClick={onCancel}>
 					Cancel
 				</button>
-				<button className="xp-btn px-3" disabled={busy} onClick={() => void submit()}>
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-3 font-bold hover:bg-accent-soft active:translate-y-px disabled:opacity-60" disabled={busy} onClick={() => void submit()}>
 					{busy ? "…" : "Save"}
 				</button>
 			</div>
@@ -219,7 +233,7 @@ export function ConfigEditor({
 	}, [fetchConfig]);
 
 	if (error) return <p className="text-[12px] text-red-700">{error}</p>;
-	if (!values) return <p className="text-[12px]">Loading…</p>;
+	if (!values) return <p className="text-[12px] opacity-60">Loading…</p>;
 
 	return (
 		<div className="text-[12px]">
@@ -232,23 +246,23 @@ export function ConfigEditor({
 							rows={3}
 							value={String(values[f.key] ?? "")}
 							onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-							className="xp-inset flex-1 rounded-sm px-1 py-0.5"
+							className={inputCls}
 						/>
 					) : (
 						<input
 							type="text"
 							value={String(values[f.key] ?? "")}
 							onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-							className="xp-inset flex-1 rounded-sm px-1 py-0.5"
+							className={inputCls}
 						/>
 					)}
 				</label>
 			))}
 			{error && <p className="text-red-700">{error}</p>}
-			{saved && <p className="text-green-700">Saved.</p>}
+			{saved && <p className="text-accent-dark font-bold">Saved.</p>}
 			<div className="mt-1 flex justify-end">
 				<button
-					className="xp-btn px-3"
+					className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-3 py-0.5 font-bold hover:bg-accent-soft active:translate-y-px disabled:opacity-60"
 					onClick={() => {
 						setSaved(false);
 						void saveConfig(values)
@@ -267,20 +281,18 @@ export function TabbedEditors({ tabs }: { tabs: { label: string; content: ReactN
 	const [active, setActive] = useState(tabs[0]?.label);
 	return (
 		<div className="flex h-full flex-col">
-			<div className="flex gap-0.5 border-b border-[#d5d2c8] bg-[#ece9d8] px-1 pt-1 text-[11px]">
+			<div className="flex gap-0.5 px-1 pt-1 text-[11px]">
 				{tabs.map((t) => (
 					<button
 						key={t.label}
-						className={`rounded-t-sm border border-b-0 border-[#d5d2c8] px-2 py-0.5 ${
-							active === t.label ? "bg-white font-bold" : "bg-[#e6e3d3]"
-						}`}
+						className={`border border-accent-border rounded-md px-2 py-0.5 shadow-[0_1px_2px_rgba(0,0,0,0.12)] ${active === t.label ? "bg-accent-soft font-bold" : "bg-chrome opacity-80 hover:opacity-100 hover:bg-accent-soft"}`}
 						onClick={() => setActive(t.label)}
 					>
 						{t.label}
 					</button>
 				))}
 			</div>
-			<div className="min-h-0 flex-1 overflow-auto bg-white p-2">
+			<div className="min-h-0 flex-1 overflow-auto border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] p-2">
 				{tabs.map((t) => (
 					<div key={t.label} className={active === t.label ? "h-full" : "hidden"}>
 						{t.content}

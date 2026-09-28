@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+const rangeCls =
+	"h-1.5 cursor-pointer appearance-none rounded-full border border-accent-border bg-surface shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] accent-accent";
 type Track = {
 	id: string;
 	name: string;
@@ -191,7 +193,6 @@ export function SpotifyPlayer() {
 				if (!cancelled) setPhase("idle");
 				return;
 			}
-			const { token } = (await res.json()) as { token: string };
 			if (cancelled) return;
 
 			await loadPlaybackSdk();
@@ -385,7 +386,7 @@ export function SpotifyPlayer() {
 
 	if (error) {
 		return (
-			<div className="xp-inset h-48 overflow-auto rounded-sm p-3 text-[11px]">
+			<div className="border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] h-48 overflow-auto p-3 text-[12px] leading-relaxed">
 				<p className="mb-2 font-bold">Unable to load Spotify catalog:</p>
 				<p>{error}</p>
 				<p className="mt-2 opacity-70">
@@ -398,12 +399,12 @@ export function SpotifyPlayer() {
 	}
 
 	if (!tracks) {
-		return <div className="xp-inset h-64 rounded-sm p-3 text-[11px]">Loading Spotify catalog...</div>;
+		return <div className="border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] h-64 p-3 text-[12px] opacity-70">Loading Spotify catalog...</div>;
 	}
 
 	if (tracks.length === 0) {
 		return (
-			<div className="xp-inset rounded-sm p-3 text-[11px]">
+			<div className="border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] p-3 text-[12px]">
 				No Spotify tracks found for artist &quot;{artistName || "Dupont"}&quot;.
 			</div>
 		);
@@ -424,7 +425,7 @@ export function SpotifyPlayer() {
 			<div className="flex items-center gap-3">
 				{track.albumImage && (
 					// eslint-disable-next-line @next/next/no-img-element
-					<img src={track.albumImage} alt={track.name} className="xp-inset h-16 w-16 rounded-sm object-cover" />
+					<img src={track.albumImage} alt={track.name} className="border border-accent-border bg-surface rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.08)] h-16 w-16 object-cover" />
 				)}
 				<div className="min-w-0 flex-1">
 					<div className="truncate text-[12px] font-bold">{track.name}</div>
@@ -433,16 +434,16 @@ export function SpotifyPlayer() {
 				</div>
 			</div>
 			<div className="mt-2 flex items-center gap-2">
-				<button className="xp-btn px-2 text-[12px]" onClick={() => skip(-1)} aria-label="Previous track" disabled={current === 0}>
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-2 text-[12px] hover:bg-accent-soft active:translate-y-px disabled:opacity-60" onClick={() => skip(-1)} aria-label="Previous track" disabled={current === 0}>
 					⏮
 				</button>
-				<button className="xp-btn px-3 text-[12px]" onClick={() => void togglePlay()} aria-label={playing ? "Pause" : "Play"}>
+				<button className={`border border-accent-border rounded-md px-3 text-[12px] shadow-[0_1px_2px_rgba(0,0,0,0.12)] ${playing ? "bg-chrome" : "bg-accent font-bold text-white"}`} onClick={() => void togglePlay()} aria-label={playing ? "Pause" : "Play"}>
 					{playing ? "⏸" : "▶"}
 				</button>
-				<button className="xp-btn px-2 text-[12px]" onClick={() => void stop()} aria-label="Stop">
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-2 text-[12px] hover:bg-accent-soft active:translate-y-px" onClick={() => void stop()} aria-label="Stop">
 					⏹
 				</button>
-				<button className="xp-btn px-2 text-[12px]" onClick={() => skip(1)} aria-label="Next track" disabled={current >= tracks.length - 1}>
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] px-2 text-[12px] hover:bg-accent-soft active:translate-y-px disabled:opacity-60" onClick={() => skip(1)} aria-label="Next track" disabled={current >= tracks.length - 1}>
 					⏭
 				</button>
 				<label className="ml-1 flex items-center gap-1 text-[10px] opacity-70" title="Volume">
@@ -454,8 +455,7 @@ export function SpotifyPlayer() {
 						step={0.05}
 						value={volume}
 						onChange={(e) => setVolume(Number(e.target.value))}
-						className="h-1.5 w-16 cursor-pointer appearance-none rounded-full bg-white accent-[#3772d6]"
-						style={{ border: "1px solid #7f9db9" }}
+						className={`${rangeCls} w-16`}
 						aria-label="Volume"
 					/>
 				</label>
@@ -477,20 +477,19 @@ export function SpotifyPlayer() {
 						scrubbingRef.current = false;
 					}}
 					onKeyUp={(e) => seekTo(Number((e.target as HTMLInputElement).value))}
-					className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white accent-[#3772d6]"
-					style={{ border: "1px solid #7f9db9" }}
+					className={`${rangeCls} flex-1`}
 					aria-label="Seek"
 				/>
 				<span className="w-8 text-[10px] tabular-nums opacity-60">{formatTime(durationMs / 1000)}</span>
 			</div>
 			{(phase === "idle" || phase === "authNeeded") && (
-				<div className="mt-2 rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
-					<div className="font-bold">Play the full tracks right here</div>
+				<div className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] mt-2 p-2 text-[12px] leading-relaxed">
+					<div className="font-bold text-accent-dark">Play the full tracks right here</div>
 					<div className="mt-0.5">
 						Connect your own Spotify account (Premium required for full playback).
 						Each visitor uses their own account — nobody shares tokens.
 					</div>
-					<button className="xp-btn mt-1.5 px-3" onClick={() => void connectSpotify()}>
+				<button className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] mt-1.5 px-3 py-0.5 font-bold hover:bg-accent-soft active:translate-y-px" onClick={() => void connectSpotify()}>
 						Connect Spotify
 					</button>
 				</div>
@@ -501,28 +500,26 @@ export function SpotifyPlayer() {
 					return (
 						<button
 							key={t.id + i}
-							className={`flex items-center gap-2 rounded px-2 py-1 text-left text-[11px] ${
-								isCurrent ? "bg-[#316ac5] text-white" : "hover:bg-[#316ac5] hover:text-white"
-							}`}
-							onClick={() => (isCurrent && playing ? void togglePlay() : void playTrack(i))}
-						>
-							<span className="w-4 text-center opacity-90">{isCurrent && playing ? "⏸" : "▶"}</span>
-							<span className="flex-1 truncate">
-								{t.name}
-								{isCurrent && playing && <span className="ml-1 opacity-70">(playing)</span>}
+							className={`border border-transparent px-2 py-1 text-left flex items-center gap-2 text-[12px] hover:bg-accent/10 rounded-md ${isCurrent ? "bg-accent-soft font-bold" : ""}`}
+						onClick={() => (isCurrent && playing ? void togglePlay() : void playTrack(i))}
+					>
+						<span className={`w-4 text-center ${isCurrent ? "text-accent" : "opacity-70"}`}>{isCurrent && playing ? "⏸" : "▶"}</span>
+						<span className={`flex-1 truncate ${isCurrent ? "font-bold" : ""}`}>
+							{t.name}
+							{isCurrent && playing && <span className="ml-1 font-normal opacity-70">(playing)</span>}
 							</span>
 							<span className={`text-[10px] ${isCurrent ? "" : "opacity-60"}`}>{formatTime(t.durationMs / 1000)}</span>
 						</button>
 					);
 				})}
 			</div>
-			<div className="mt-2 flex items-center justify-between rounded bg-[#e6e3d3] p-1.5 text-[11px] shadow-[inset_1px_1px_2px_rgba(0,0,0,0.15)]">
+			<div className="border-t border-t-accent-border bg-chrome/50 mt-2 flex items-center justify-between px-2 py-1.5 text-[11px]">
 				<span>
 					{tracks.length} tracks{artistName ? ` from ${artistName}` : ""}
 				</span>
 				{phase !== "idle" && (
 					<button
-						className="text-[#0000cc] underline"
+						className="rounded-md px-1 underline hover:bg-accent/10"
 						onClick={async () => {
 							playerRef.current?.disconnect();
 							playerRef.current = null;

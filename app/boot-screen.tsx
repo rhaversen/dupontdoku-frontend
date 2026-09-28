@@ -33,7 +33,7 @@ export function BootScreen({ onComplete }: { onComplete: (code: string) => void 
 				}
 				runRef.current = started.run;
 				privateKeyRef.current = started.privateKey;
-					setProgress({ completed: started.run.completed, required: started.run.required, respondedSeqs: started.run.respondedSeqs, updatedAt: Date.now() });
+				setProgress({ completed: started.run.completed, required: started.run.required, respondedSeqs: started.run.respondedSeqs, updatedAt: Date.now() });
 				if (started.run.code) {
 					setPhase("minted");
 					onComplete(started.run.code);
@@ -132,21 +132,29 @@ export function BootScreen({ onComplete }: { onComplete: (code: string) => void 
 				setPhase("waiting");
 			}
 		},
-		[progress.respondedSeqs, onComplete],
+		[progress.respondedSeqs, progress.required, onComplete],
 	);
 
 	const remainingMs = Math.max(0, (progress.required ?? 10) - progress.completed) * 6 * 60 * 1000;
 	const remainingLabel = formatRemaining(remainingMs);
-	const [now, setNow] = useState(Date.now());
+	// clock countdown: the interval callback reads the clock and stores the
+	// remaining time — setState is never called synchronously in the effect body
+	// (the first update fires via timeout so the render stays pure)
+	const [remainingMsToReveal, setRemainingMsToReveal] = useState<number | null>(null);
 	useEffect(() => {
 		if (phase !== "waiting" || !nextRevealAt) return;
-		const id = setInterval(() => setNow(Date.now()), 1000);
-		return () => clearInterval(id);
+		const update = () => setRemainingMsToReveal(Math.max(0, nextRevealAt - Date.now()));
+		const timeout = setTimeout(update, 0);
+		const id = setInterval(update, 1000);
+		return () => {
+			clearTimeout(timeout);
+			clearInterval(id);
+		};
 	}, [phase, nextRevealAt]);
 
 	if (phase === "error") {
 		return (
-			<div className="flex h-full w-full flex-col items-center justify-center bg-black text-[#cccccc] font-mono">
+			<div className="flex h-full w-full flex-col items-center justify-center bg-black font-mono text-[#cccccc]">
 				<p>Boot failed: {error}</p>
 				<p className="mt-2 opacity-60">Reload to try again.</p>
 			</div>
@@ -155,7 +163,7 @@ export function BootScreen({ onComplete }: { onComplete: (code: string) => void 
 
 	if (phase === "minted") {
 		return (
-			<div className="flex h-full w-full flex-col items-center justify-center bg-black text-[#cccccc] font-mono">
+			<div className="flex h-full w-full flex-col items-center justify-center bg-black font-mono text-[#cccccc]">
 				<p>Update complete. Rebooting…</p>
 			</div>
 		);
@@ -163,13 +171,14 @@ export function BootScreen({ onComplete }: { onComplete: (code: string) => void 
 
 	return (
 		<div className="relative h-full w-full overflow-hidden bg-black font-mono text-[#cccccc]">
-			<div className="absolute top-1/2 left-1/2 w-80 -translate-x-1/2 -translate-y-1/2">
+			<div className="absolute top-1/2 left-1/2 w-80 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[#555] bg-[#0b0b0b]/70 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.6)] backdrop-blur-sm">
 				<p className="mb-2 text-[13px]">
 					{phase === "challenge" ? "Update ready to install…" : "Installing updates…"}
 				</p>
 				<div className="h-3 w-full border border-[#555] bg-[#111]">
 					<div
-						className="h-full bg-linear-to-r from-[#1e50c8] to-[#3f8cf3] transition-all duration-500"
+						// grayscale bar: filled = light, empty = near-black
+						className="h-full bg-[#cccccc] transition-all duration-500"
 						style={{ width: `${Math.min(100, (progress.completed / (progress.required ?? 10)) * 100)}%` }}
 					/>
 				</div>
@@ -180,9 +189,9 @@ export function BootScreen({ onComplete }: { onComplete: (code: string) => void 
 				    (a layout shift would move the dialog after the server sent its
 				    position, desyncing the click coordinates) */}
 				<p className="mt-1 h-4 text-[10px] opacity-50">
-					{nextRevealAt && phase === "waiting" && <>Next update in {formatRemaining(Math.max(0, nextRevealAt - now))}</>}
+					{remainingMsToReveal !== null && <>{`Next update in ${formatRemaining(remainingMsToReveal)}`}</>}
 				</p>
-				<p className="h-4 text-[10px] text-red-400">
+				<p className="h-4 text-[10px] text-[#ff8080]">
 					{respondError && <>Click rejected: {respondError}</>}
 				</p>
 			</div>
@@ -210,7 +219,7 @@ function ChallengeDialog({
 
 	return (
 		<div
-			className="xp-window absolute w-55"
+			className="border border-accent-border bg-chrome rounded-md shadow-[0_14px_40px_rgba(0,0,0,0.35)] absolute w-55"
 			style={{ left, top }}
 			onClick={(e) => {
 				// the server compares against viewport-space coords, so the click
@@ -218,16 +227,16 @@ function ChallengeDialog({
 				void onRespond(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
 			}}
 		>
-			<div className="xp-title">
-				<span className="flex-1">System Update</span>
-				<button className="xp-title-btn close" aria-label="Close">
-					<span className="text-[14px]">✕</span>
+				<div className="flex items-center gap-1 rounded-md bg-chrome-deep px-1.5 py-1 font-bold text-ink">
+					<span className="flex-1">System Update</span>
+					<button className="grid h-4 w-5 place-items-center rounded border border-accent-border bg-accent-soft/70 text-[10px] font-bold leading-none text-ink hover:bg-accent hover:border-accent hover:text-white" aria-label="Close">
+					<span className="text-[13px] leading-none">✕</span>
 				</button>
 			</div>
 			<div className="p-3 text-[11px]">
-				<p>Click OK to install this update.</p>
+				<p className="mb-1">Click OK to install this update.</p>
 				<button
-					className="xp-btn mt-2 px-4"
+					className="border border-accent-border bg-chrome rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.12)] font-bold mt-2 px-4 hover:bg-accent-soft active:translate-y-px"
 					onClick={(e) => {
 						e.stopPropagation();
 						void onRespond(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
